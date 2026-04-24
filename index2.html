@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VR 射击气球 - 修复版</title>
+    <style>
+        :root {
+            --bg: #1a1a2e;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            overflow: hidden;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh;
+            width: 100vw;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* HUD覆盖层 */
+        #hud {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+            padding-top: 24px;
+        }
+
+        #score-panel {
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-radius: 24px;
+            padding: 14px 32px;
+            color: #fff;
+            text-align: center;
+            pointer-events: auto;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        #score-panel .label {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            opacity: 0.8;
+            font-weight: 500;
+        }
+
+        #score-panel .score {
+            font-size: 52px;
+            font-weight: 700;
+            line-height: 1;
+            background: linear-gradient(135deg, #ffd700, #ffaa00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            filter: drop-shadow(0 2px 8px rgba(255, 170, 0, 0.5));
+        }
+
+        #score-panel .combo {
+            font-size: 14px;
+            color: #ffdd57;
+            opacity: 0;
+            transition: opacity 0.2s;
+            min-height: 20px;
+        }
+
+        #score-panel .combo.active {
+            opacity: 1;
+            animation: pulse 0.4s ease-out;
+        }
+
+        @keyframes pulse {
+            0%,
+            100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.3);
+            }
+        }
+
+        /* 进入VR按钮 */
+        #vr-entry {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            pointer-events: auto;
+        }
+
+        #enter-vr-btn {
+            display: block;
+            padding: 16px 44px;
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: #fff;
+            background: linear-gradient(135deg, #e94560, #c23152);
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 30px rgba(233, 69, 96, 0.5);
+            text-transform: uppercase;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        #enter-vr-btn:hover {
+            background: linear-gradient(135deg, #ff5a7a, #e94560);
+            box-shadow: 0 12px 40px rgba(233, 69, 96, 0.7);
+            transform: translateY(-3px);
+        }
+
+        #enter-vr-btn:active {
+            transform: scale(0.96);
+            transition: transform 0.1s;
+        }
+
+        #enter-vr-btn:disabled {
+            background: #555;
+            box-shadow: none;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+
+        /* 提示信息 */
+        #vr-hints {
+            position: fixed;
+            bottom: 130px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 15;
+            pointer-events: none;
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .hint-badge {
+            background: rgba(255, 255, 255, 0.12);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 20px;
+            padding: 8px 18px;
+            color: #fff;
+            font-size: 13px;
+            letter-spacing: 1px;
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            white-space: nowrap;
+        }
+
+        .hint-badge .key {
+            font-weight: 700;
+            color: #ffd700;
+        }
+
+        /* 加载/错误状态 */
+        #status-msg {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 30;
+            color: #fff;
+            font-size: 18px;
+            text-align: center;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 20px 30px;
+            border-radius: 16px;
+            display: none;
+        }
+
+        #status-msg.error {
+            background: rgba(180, 30, 30, 0.85);
+            display: block;
+        }
+
+        #status-msg.info {
+            background: rgba(30, 30, 50, 0.85);
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HUD -->
+    <div id="hud">
+        <div id="score-panel">
+            <div class="label">🏆 得分</div>
+            <div class="score" id="score-value">0</div>
+            <div class="combo" id="combo-text"></div>
+        </div>
+    </div>
+
+    <!-- VR入口 -->
+    <div id="vr-entry">
+        <button id="enter-vr-btn">🎯 进入VR游戏</button>
+    </div>
+
+    <!-- 操作提示 -->
+    <div id="vr-hints">
+        <span class="hint-badge">🔫 <span class="key">扳机</span> 射击</span>
+        <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
+        <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
+    </div>
+
+    <!-- 状态消息 -->
+    <div id="status-msg"></div>
+
+    <!-- Three.js Import Map -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ==================== DOM 元素 ====================
+        const scoreValueEl = document.getElementById('score-value');
+        const comboTextEl = document.getElementById('combo-text');
+        const enterVRBtn = document.getElementById('enter-vr-btn');
+        const statusMsgEl = document.getElementById('status-msg');
+        const vrHintsEl = document.getElementById('vr-hints');
+        const hudEl = document.getElementById('hud');
+        const vrEntryEl = document.getElementById('vr-entry');
+
+        // ==================== 游戏状态 ====================
+        let score = 0;
+        let comboCount = 0;
+        let comboTimer = null;
+        const COMBO_TIMEOUT = 1500;
+        const BALLOON_POINTS = 10;
+        const GOLDEN_POINTS = 30;
+        const MAX_BALLOONS = 20;
+        const SPAWN_INTERVAL = 1800;
+        const SPAWN_RADIUS_MIN = 4;
+        const SPAWN_RADIUS_MAX = 14;
+        const SPAWN_HEIGHT_MIN = 1.2;
+        const SPAWN_HEIGHT_MAX = 4.5;
+        const MOVE_SPEED = 3.5;
+        const RAY_MAX_DISTANCE = 20;
+        const GOLDEN_CHANCE = 0.12;
+
+        // ==================== Three.js 初始化 ====================
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = false;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87ceeb);
+        scene.fog = new THREE.Fog(0xb8dff5, 30, 80);
+
+        // ==================== 相机与移动装备 ====================
+        const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 0);
+
+        const dolly = new THREE.Group();
+        dolly.add(camera);
+        scene.add(dolly);
+
+        // ==================== 光照 ====================
+        const ambientLight = new THREE.AmbientLight(0xffeedd, 1.4);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 3.5);
+        sunLight.position.set(20, 30, 10);
+        sunLight.castShadow = false;
+        scene.add(sunLight);
+
+        const hemisphereLight = new THREE.HemisphereLight(0x87ceeb, 0x5a8a3c, 0.9);
+        scene.add(hemisphereLight);
+
+        // ==================== 地面 ====================
+        const groundGeom = new THREE.PlaneGeometry(80, 80);
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x5a9e3f, roughness: 0.85, metalness: 0.05 });
+        const ground = new THREE.Mesh(groundGeom, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = false;
+        ground.name = 'ground';
+        scene.add(ground);
+
+        const gridHelper = new THREE.PolarGridHelper(35, 40, 28, 128, 0x4a8a30, 0x4a8a30);
+        gridHelper.position.y = 0.01;
+        scene.add(gridHelper);
+
+        // ==================== 环境装饰 ====================
+        function createTree(x, z, height = 2.5) {
+            const tree = new THREE.Group();
+            const trunkGeom = new THREE.CylinderGeometry(0.12, 0.18, height * 0.5, 8);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8B6914, roughness: 0.7 });
+            const trunk = new THREE.Mesh(trunkGeom, trunkMat);
+            trunk.position.y = height * 0.25;
+            tree.add(trunk);
+            const crownGeom = new THREE.SphereGeometry(height * 0.35, 12, 10);
+            const crownMat = new THREE.MeshStandardMaterial({ color: 0x3d7a28, roughness: 0.6 });
+            const crown = new THREE.Mesh(crownGeom, crownMat);
+            crown.position.y = height * 0.6;
+            tree.add(crown);
+            const crown2Geom = new THREE.SphereGeometry(height * 0.28, 10, 8);
+            const crown2 = new THREE.Mesh(crown2Geom, crownMat);
+            crown2.position.y = height * 0.78;
+            crown2.position.x = height * 0.1;
+            tree.add(crown2);
+            tree.position.set(x, 0, z);
+            tree.scale.setScalar(0.7 + Math.random() * 0.6);
+            return tree;
+        }
+
+        for (let i = 0; i < 35; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 8 + Math.random() * 28;
+            const tx = Math.cos(angle) * radius;
+            const tz = Math.sin(angle) * radius;
+            if (Math.abs(tx) < 3 && Math.abs(tz) < 3) continue;
+            const tree = createTree(tx, tz, 1.8 + Math.random() * 3.5);
+            scene.add(tree);
+        }
+
+        // 彩色柱子
+        function createPillar(x, z, color = 0xe8d5b7) {
+            const group = new THREE.Group();
+            const pillarGeom = new THREE.CylinderGeometry(0.3, 0.4, 3.5, 12);
+            const pillarMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.2 });
+            const pillar = new THREE.Mesh(pillarGeom, pillarMat);
+            pillar.position.y = 1.75;
+            group.add(pillar);
+            const topGeom = new THREE.SphereGeometry(0.4, 12, 8);
+            const top = new THREE.Mesh(topGeom, pillarMat);
+            top.position.y = 3.7;
+            group.add(top);
+            group.position.set(x, 0, z);
+            return group;
+        }
+
+        const pillarColors = [0xe8d5b7, 0xd4a574, 0xc9b99a, 0xb8a88a, 0xe0c9a6];
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2 + Math.random() * 0.3;
+            const radius = 10 + Math.random() * 16;
+            const px = Math.cos(angle) * radius;
+            const pz = Math.sin(angle) * radius;
+            const pillar = createPillar(px, pz, pillarColors[i % pillarColors.length]);
+            scene.add(pillar);
+        }
+
+        // ==================== 气球系统 ====================
+        const balloons = [];
+        const balloonGroup = new THREE.Group();
+        scene.add(balloonGroup);
+
+        const balloonColors = [
+            0xff3b3b, 0xff6b35, 0xffc635, 0x4caf50, 0x2196f3, 0x9c27b0, 0xe91e63, 0x00bcd4, 0xff9800, 0x8bc34a
+        ];
+        const goldenColor = 0xffd700;
+
+        function createBalloonMesh(color) {
+            const group = new THREE.Group();
+            const bodyGeom = new THREE.SphereGeometry(0.35, 24, 20);
+            const bodyMat = new THREE.MeshStandardMaterial({
+                color, roughness: 0.25, metalness: 0.05,
+                emissive: color, emissiveIntensity: 0.15
+            });
+            const body = new THREE.Mesh(bodyGeom, bodyMat);
+            body.name = 'balloonBody';
+            group.add(body);
+
+            const knotGeom = new THREE.ConeGeometry(0.06, 0.14, 8, 8);
+            const knotMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.6), roughness: 0.5 });
+            const knot = new THREE.Mesh(knotGeom, knotMat);
+            knot.position.y = -0.38;
+            group.add(knot);
+
+            const tailGeom = new THREE.CylinderGeometry(0.015, 0.025, 0.22, 6);
+            const tailMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6 });
+            const tail = new THREE.Mesh(tailGeom, tailMat);
+            tail.position.y = -0.5;
+            group.add(tail);
+
+            const highlightGeom = new THREE.SphereGeometry(0.08, 8, 6);
+            const highlightMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+            const highlight = new THREE.Mesh(highlightGeom, highlightMat);
+            highlight.position.set(0.15, 0.18, 0.15);
+            group.add(highlight);
+
+            group.userData = {
+                bodyMesh: body,
+                bodyMaterial: bodyMat,
+                highlightMesh: highlight,
+                highlightMaterial: highlightMat,
+            };
+            return group;
+        }
+
+        function spawnBalloon(forceGolden = false) {
+            if (balloons.length >= MAX_BALLOONS) {
+                removeOldestBalloon();
+            }
+            const isGolden = forceGolden || Math.random() < GOLDEN_CHANCE;
+            const color = isGolden ? goldenColor : balloonColors[Math.floor(Math.random() * balloonColors.length)];
+            const balloon = createBalloonMesh(color);
+            balloon.userData.isGolden = isGolden;
+            balloon.userData.color = color;
+            balloon.userData.spawnTime = performance.now();
+            balloon.userData.baseY = SPAWN_HEIGHT_MIN + Math.random() * (SPAWN_HEIGHT_MAX - SPAWN_HEIGHT_MIN);
+            balloon.userData.floatSpeed = 0.5 + Math.random() * 1.8;
+            balloon.userData.floatAmp = 0.15 + Math.random() * 0.6;
+            balloon.userData.floatPhase = Math.random() * Math.PI * 2;
+            balloon.userData.driftX = (Math.random() - 0.5) * 0.4;
+            balloon.userData.driftZ = (Math.random() - 0.5) * 0.4;
+            balloon.userData.points = isGolden ? GOLDEN_POINTS : BALLOON_POINTS;
+
+            const playerPos = dolly.position;
+            const angle = Math.random() * Math.PI * 2;
+            const radius = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
+            const spawnX = playerPos.x + Math.cos(angle) * radius;
+            const spawnZ = playerPos.z + Math.sin(angle) * radius;
+            const spawnY = balloon.userData.baseY;
+            balloon.position.set(spawnX, spawnY, spawnZ);
+            balloon.userData.spawnPos = balloon.position.clone();
+
+            if (isGolden) {
+                balloon.userData.bodyMaterial.emissive = new THREE.Color(goldenColor);
+                balloon.userData.bodyMaterial.emissiveIntensity = 0.5;
+                balloon.scale.setScalar(0.85);
+            }
+            balloonGroup.add(balloon);
+            balloons.push(balloon);
+            return balloon;
+        }
+
+        function removeOldestBalloon() {
+            if (balloons.length === 0) return;
+            const oldest = balloons.shift();
+            const riseSpeed = 3 + Math.random() * 4;
+            const driftX = (Math.random() - 0.5) * 2;
+            const driftZ = (Math.random() - 0.5) * 2;
+            const startTime = performance.now();
+            const duration = 800;
+            const startPos = oldest.position.clone();
+            function animateRise(time) {
+                const elapsed = time - startTime;
+                const t = Math.min(elapsed / duration, 1);
+                oldest.position.set(
+                    startPos.x + driftX * (t * t),
+                    startPos.y + riseSpeed * (t * t),
+                    startPos.z + driftZ * (t * t)
+                );
+                oldest.scale.setScalar(1 - t * 0.7);
+                oldest.userData.bodyMaterial.opacity = 1 - t;
+                oldest.userData.bodyMaterial.transparent = true;
+                if (t < 1) {
+                    requestAnimationFrame(animateRise);
+                } else {
+                    disposeBalloon(oldest);
+                }
+            }
+            requestAnimationFrame(animateRise);
+        }
+
+        function disposeBalloon(balloon) {
+            balloonGroup.remove(balloon);
+            balloon.traverse((child) => {
+                if (child.geometry && child.geometry !== balloon.userData.bodyMesh?.geometry) {
+                    child.geometry.dispose();
+                }
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => m.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
+                }
+            });
+            if (balloon.userData.bodyMaterial) balloon.userData.bodyMaterial.dispose();
+            if (balloon.userData.highlightMaterial) balloon.userData.highlightMaterial.dispose();
+            if (balloon.userData.bodyMesh?.geometry) balloon.userData.bodyMesh.geometry.dispose();
+            if (balloon.userData.highlightMesh?.geometry) balloon.userData.highlightMesh.geometry.dispose();
+        }
+
+        function destroyBalloon(balloon, hitPoint) {
+            const idx = balloons.indexOf(balloon);
+            if (idx >= 0) balloons.splice(idx, 1);
+            const color = balloon.userData.color;
+            const points = balloon.userData.points;
+            const isGolden = balloon.userData.isGolden;
+            createExplosion(hitPoint || balloon.position.clone(), color, isGolden);
+            addScore(points, isGolden);
+            disposeBalloon(balloon);
+            playPopSound(isGolden);
+        }
+
+        // ==================== 爆炸粒子系统 ====================
+        const particles = [];
+        const particleGroup = new THREE.Group();
+        scene.add(particleGroup);
+
+        function createExplosion(position, color, isGolden = false) {
+            const particleCount = isGolden ? 25 : 15;
+            const baseColor = new THREE.Color(color);
+            for (let i = 0; i < particleCount; i++) {
+                const size = 0.02 + Math.random() * 0.07;
+                const geom = new THREE.SphereGeometry(size, 6, 4);
+                const mat = new THREE.MeshBasicMaterial({
+                    color: baseColor.clone().multiplyScalar(0.7 + Math.random() * 0.5),
+                    transparent: true, opacity: 1
+                });
+                const particle = new THREE.Mesh(geom, mat);
+                particle.position.copy(position);
+                const speed = 2 + Math.random() * 7;
+                const dir = new THREE.Vector3(
+                    (Math.random() - 0.5) * 2,
+                    Math.random() * 1.5 + 0.5,
+                    (Math.random() - 0.5) * 2
+                ).normalize();
+                particle.userData = {
+                    velocity: dir.multiplyScalar(speed),
+                    life: 0.4 + Math.random() * 0.7,
+                    maxLife: 0.4 + Math.random() * 0.7,
+                    material: mat
+                };
+                particleGroup.add(particle);
+                particles.push(particle);
+            }
+            if (isGolden) {
+                for (let i = 0; i < 8; i++) {
+                    const size = 0.04 + Math.random() * 0.06;
+                    const geom = new THREE.SphereGeometry(size, 6, 4);
+                    const mat = new THREE.MeshBasicMaterial({
+                        color: 0xffffcc, transparent: true, opacity: 1
+                    });
+                    const sparkle = new THREE.Mesh(geom, mat);
+                    sparkle.position.copy(position);
+                    const speed = 3 + Math.random() * 5;
+                    const dir = new THREE.Vector3(
+                        (Math.random() - 0.5) * 2,
+                        Math.random() * 2,
+                        (Math.random() - 0.5) * 2
+                    ).normalize();
+                    sparkle.userData = {
+                        velocity: dir.multiplyScalar(speed),
+                        life: 0.3 + Math.random() * 0.4,
+                        maxLife: 0.3 + Math.random() * 0.4,
+                        material: mat
+                    };
+                    particleGroup.add(sparkle);
+                    particles.push(sparkle);
+                }
+            }
+        }
+
+        function updateParticles(deltaTime) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.userData.life -= deltaTime;
+                if (p.userData.life <= 0) {
+                    p.userData.material.dispose();
+                    p.geometry.dispose();
+                    particleGroup.remove(p);
+                    particles.splice(i, 1);
+                } else {
+                    const t = p.userData.life / p.userData.maxLife;
+                    p.userData.material.opacity = t;
+                    p.position.x += p.userData.velocity.x * deltaTime;
+                    p.position.y += p.userData.velocity.y * deltaTime;
+                    p.position.z += p.userData.velocity.z * deltaTime;
+                    p.userData.velocity.y += 1.5 * deltaTime;
+                    p.scale.setScalar(t);
+                }
+            }
+        }
+
+        // ==================== 音效系统 ====================
+        let audioContext = null;
+        function initAudio() {
+            if (!audioContext) {
+                try {
+                    audioContext = new(window.AudioContext || window.webkitAudioContext)();
+                } catch (e) { console.warn('无法初始化音频:', e); }
+            }
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+
+        function playPopSound(isGolden = false) {
+            if (!audioContext) return;
+            try {
+                const now = audioContext.currentTime;
+                const duration = isGolden ? 0.25 : 0.15;
+                const bufferSize = Math.floor(audioContext.sampleRate * duration);
+                const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    const t = i / audioContext.sampleRate;
+                    const envelope = Math.exp(-t * (isGolden ? 18 : 25));
+                    data[i] = (Math.random() * 2 - 1) * envelope * 0.7 + Math.sin(t * (isGolden ? 800 : 500) * Math.PI * 2) * envelope * 0.4;
+                }
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                const gainNode = audioContext.createGain();
+                gainNode.gain.setValueAtTime(isGolden ? 0.7 : 0.45, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                source.start(now);
+                source.stop(now + duration);
+                if (isGolden) {
+                    const osc = audioContext.createOscillator();
+                    const gain2 = audioContext.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(1200, now);
+                    osc.frequency.exponentialRampToValueAtTime(600, now + 0.2);
+                    gain2.gain.setValueAtTime(0.3, now);
+                    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    osc.connect(gain2);
+                    gain2.connect(audioContext.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                }
+            } catch (e) {}
+        }
+
+        function playShootSound() {
+            if (!audioContext) return;
+            try {
+                const now = audioContext.currentTime;
+                const duration = 0.06;
+                const bufferSize = Math.floor(audioContext.sampleRate * duration);
+                const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    const t = i / audioContext.sampleRate;
+                    data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 60);
+                }
+                const source = audioContext.createBufferSource();
+                source.buffer = buffer;
+                const gainNode = audioContext.createGain();
+                gainNode.gain.setValueAtTime(0.25, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                source.start(now);
+                source.stop(now + duration);
+            } catch (e) {}
+        }
+
+        // ==================== 得分系统 ====================
+        function addScore(points, isGolden = false) {
+            score += points;
+            scoreValueEl.textContent = score;
+            scoreValueEl.style.transform = 'scale(1.25)';
+            setTimeout(() => { scoreValueEl.style.transform = 'scale(1)'; }, 150);
+            comboCount++;
+            if (comboTimer) clearTimeout(comboTimer);
+            comboTimer = setTimeout(() => {
+                comboCount = 0;
+                comboTextEl.textContent = '';
+                comboTextEl.classList.remove('active');
+            }, COMBO_TIMEOUT);
+            if (comboCount >= 3) {
+                comboTextEl.textContent = `🔥 ${comboCount}连击!`;
+                comboTextEl.classList.add('active');
+                setTimeout(() => comboTextEl.classList.remove('active'), 500);
+            } else if (isGolden) {
+                comboTextEl.textContent = '⭐ 金色气球!';
+                comboTextEl.classList.add('active');
+                setTimeout(() => comboTextEl.classList.remove('active'), 500);
+            }
+        }
+
+        // ==================== 手柄与射线系统 ====================
+        let leftController = null;
+        let rightController = null;
+        const controllers = [];
+
+        function createLaserPointer() {
+            const laserGeom = new THREE.CylinderGeometry(0.004, 0.004, 1, 8);
+            const laserMat = new THREE.MeshBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.7 });
+            const laser = new THREE.Mesh(laserGeom, laserMat);
+            laser.visible = false;
+            laser.name = 'laserPointer';
+            return laser;
+        }
+
+        function createControllerGrip() {
+            const group = new THREE.Group();
+            const gripGeom = new THREE.BoxGeometry(0.04, 0.12, 0.04);
+            const gripMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.4 });
+            const grip = new THREE.Mesh(gripGeom, gripMat);
+            grip.position.y = -0.04;
+            group.add(grip);
+            const ringGeom = new THREE.TorusGeometry(0.05, 0.012, 8, 16);
+            const ringMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.3, metalness: 0.6 });
+            const ring = new THREE.Mesh(ringGeom, ringMat);
+            ring.position.y = 0.03;
+            ring.rotation.x = Math.PI / 3;
+            group.add(ring);
+            const tipGeom = new THREE.SphereGeometry(0.025, 8, 6);
+            const tipMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.3, emissive: 0x333333, emissiveIntensity: 0.5 });
+            const tip = new THREE.Mesh(tipGeom, tipMat);
+            tip.position.set(0, 0.06, -0.03);
+            group.add(tip);
+            return group;
+        }
+
+        function setupController(index) {
+            const controller = renderer.xr.getController(index);
+            const grip = renderer.xr.getControllerGrip(index);
+            const gripModel = createControllerGrip();
+            grip.add(gripModel);
+            const laser = createLaserPointer();
+            controller.add(laser);
+            controller.userData.laser = laser;
+            controller.userData.laserMaterial = laser.material;
+            controller.userData.gripModel = gripModel;
+            controller.userData.index = index;
+            scene.add(controller);
+            scene.add(grip);
+            controllers.push(controller);
+
+            // 🔫 使用 selectstart 事件进行射击（扳机键），兼容性最好
+            controller.addEventListener('selectstart', (event) => {
+                const ctrl = event.target;
+                const hitResult = checkBalloonHit(ctrl);
+                if (hitResult) {
+                    destroyBalloon(hitResult.balloon, hitResult.point);
+                } else {
+                    playShootSound();
+                }
+            });
+
+            if (index === 0) {
+                leftController = controller;
+            } else {
+                rightController = controller;
+            }
+            return { controller, grip };
+        }
+
+        const raycaster = new THREE.Raycaster();
+        raycaster.far = RAY_MAX_DISTANCE;
+
+        function getControllerRay(controller) {
+            const origin = new THREE.Vector3();
+            controller.getWorldPosition(origin);
+            const direction = new THREE.Vector3(0, 0, -1);
+            direction.applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion()));
+            return { origin, direction };
+        }
+
+        function updateLaserPointer(controller, hitPoint = null) {
+            const laser = controller.userData.laser;
+            const laserMat = controller.userData.laserMaterial;
+            if (!laser || !laserMat) return;
+            const { origin, direction } = getControllerRay(controller);
+            if (hitPoint) {
+                const distance = origin.distanceTo(hitPoint);
+                laser.scale.set(1, distance, 1);
+                laser.position.set(0, 0, -distance / 2);
+                laserMat.color.set(0x00ff44);
+                laserMat.opacity = 0.9;
+                laser.visible = true;
+            } else {
+                laser.scale.set(1, RAY_MAX_DISTANCE, 1);
+                laser.position.set(0, 0, -RAY_MAX_DISTANCE / 2);
+                laserMat.color.set(0xff4444);
+                laserMat.opacity = 0.5;
+                laser.visible = true;
+            }
+        }
+
+        function checkBalloonHit(controller) {
+            const { origin, direction } = getControllerRay(controller);
+            raycaster.set(origin, direction);
+            const hitTargets = [];
+            for (const balloon of balloons) {
+                if (balloon.userData.bodyMesh) {
+                    hitTargets.push(balloon.userData.bodyMesh);
+                }
+            }
+            const intersects = raycaster.intersectObjects(hitTargets, false);
+            if (intersects.length > 0) {
+                const hitMesh = intersects[0].object;
+                for (const balloon of balloons) {
+                    if (balloon.userData.bodyMesh === hitMesh) {
+                        return { balloon, point: intersects[0].point.clone() };
+                    }
+                }
+            }
+            return null;
+        }
+
+        // ==================== 右手柄 A/B 键退出检测 ====================
+        let prevRightButtonState = { button4: false, button5: false };
+
+        function exitVR() {
+            if (renderer.xr.isPresenting) {
+                const session = renderer.xr.getSession();
+                if (session) {
+                    session.end().catch(() => {});
+                }
+            }
+        }
+
+        function handleExitInput(frame) {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            const inputSources = session.inputSources;
+            for (const source of inputSources) {
+                if (source.handedness !== 'right') continue;
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                if (gp.buttons.length < 6) continue;
+                const currA = gp.buttons[4].pressed;
+                const currB = gp.buttons[5].pressed;
+                if (currA && !prevRightButtonState.button4) {
+                    exitVR();
+                }
+                if (currB && !prevRightButtonState.button5) {
+                    exitVR();
+                }
+                prevRightButtonState.button4 = currA;
+                prevRightButtonState.button5 = currB;
+            }
+        }
+
+        // ==================== 摇杆移动（修复为 axes[0]/axes[1]） ====================
+        function handleMoveInput(deltaTime) {
+            for (const ctrl of controllers) {
+                const gpad = ctrl.gamepad;
+                if (!gpad) continue;
+                const axes = gpad.axes;
+                const stickX = axes[0] || 0;
+                const stickY = axes[1] || 0;
+                const deadzone = 0.2;
+                const mx = Math.abs(stickX) > deadzone ? stickX : 0;
+                const my = Math.abs(stickY) > deadzone ? stickY : 0;
+                if (mx !== 0 || my !== 0) {
+                    const camForward = new THREE.Vector3(0, 0, -1);
+                    camForward.applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+                    camForward.y = 0;
+                    camForward.normalize();
+                    const camRight = new THREE.Vector3(1, 0, 0);
+                    camRight.applyQuaternion(camera.getWorldQuaternion(new THREE.Quaternion()));
+                    camRight.y = 0;
+                    camRight.normalize();
+                    const moveDir = new THREE.Vector3();
+                    moveDir.addScaledVector(camForward, -my);
+                    moveDir.addScaledVector(camRight, mx);
+                    moveDir.normalize();
+                    const speed = MOVE_SPEED * Math.max(Math.abs(mx), Math.abs(my));
+                    dolly.position.x += moveDir.x * speed * deltaTime;
+                    dolly.position.z += moveDir.z * speed * deltaTime;
+                    const maxRange = 30;
+                    dolly.position.x = THREE.MathUtils.clamp(dolly.position.x, -maxRange, maxRange);
+                    dolly.position.z = THREE.MathUtils.clamp(dolly.position.z, -maxRange, maxRange);
+                    break;
+                }
+            }
+        }
+
+        // ==================== 气球定时生成 ====================
+        let lastSpawnTime = 0;
+
+        function updateBalloonSpawning(timestamp) {
+            if (timestamp - lastSpawnTime > SPAWN_INTERVAL) {
+                lastSpawnTime = timestamp;
+                if (balloons.length < MAX_BALLOONS) {
+                    spawnBalloon();
+                }
+                if (Math.random() < 0.25 && balloons.length < MAX_BALLOONS - 1) {
+                    setTimeout(() => {
+                        if (balloons.length < MAX_BALLOONS) spawnBalloon();
+                    }, 300 + Math.random() * 500);
+                }
+            }
+        }
+
+        function updateBalloonAnimation(timestamp) {
+            for (const balloon of balloons) {
+                const t = timestamp * 0.001;
+                const floatY = Math.sin(t * balloon.userData.floatSpeed + balloon.userData.floatPhase) * balloon.userData.floatAmp;
+                balloon.position.y = balloon.userData.baseY + floatY;
+                balloon.position.x += balloon.userData.driftX * 0.016;
+                balloon.position.z += balloon.userData.driftZ * 0.016;
+                balloon.rotation.y += 0.003;
+                balloon.rotation.x += Math.sin(t * 0.7 + balloon.userData.floatPhase) * 0.005;
+                const dx = balloon.position.x - balloon.userData.spawnPos.x;
+                const dz = balloon.position.z - balloon.userData.spawnPos.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+                if (dist > 5) {
+                    balloon.userData.driftX *= -0.8;
+                    balloon.userData.driftZ *= -0.8;
+                }
+            }
+        }
+
+        // ==================== 主循环 ====================
+        const clock = new THREE.Clock();
+
+        function animate(timestamp, xrFrame) {
+            const deltaTime = Math.min(clock.getDelta(), 0.1);
+
+            if (renderer.xr.isPresenting) {
+                handleExitInput(xrFrame);
+                handleMoveInput(deltaTime);
+                updateBalloonSpawning(timestamp);
+                updateBalloonAnimation(timestamp);
+                updateParticles(deltaTime);
+                // 更新激光线视觉
+                for (const ctrl of controllers) {
+                    const hitResult = checkBalloonHit(ctrl);
+                    updateLaserPointer(ctrl, hitResult ? hitResult.point : null);
+                }
+                if (vrEntryEl.style.display !== 'none') {
+                    vrEntryEl.style.display = 'none';
+                    vrHintsEl.style.display = 'none';
+                }
+                if (statusMsgEl.style.display !== 'none') statusMsgEl.style.display = 'none';
+            } else {
+                if (vrEntryEl.style.display === 'none') {
+                    vrEntryEl.style.display = 'block';
+                    vrHintsEl.style.display = 'flex';
+                }
+                updateParticles(deltaTime);
+                updateBalloonAnimation(timestamp);
+            }
+            renderer.render(scene, camera);
+        }
+
+        renderer.setAnimationLoop(animate);
+
+        // ==================== 初始化 ====================
+        function init() {
+            setupController(0);
+            setupController(1);
+
+            for (let i = 0; i < 8; i++) {
+                setTimeout(() => spawnBalloon(), i * 250);
+            }
+            setTimeout(() => spawnBalloon(true), 1500);
+            lastSpawnTime = performance.now();
+
+            enterVRBtn.addEventListener('click', async () => {
+                enterVRBtn.disabled = true;
+                enterVRBtn.textContent = '⏳ 启动中...';
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                    if (!supported) {
+                        showStatus('❌ 设备不支持沉浸式VR', 'error');
+                        enterVRBtn.disabled = false;
+                        enterVRBtn.textContent = '🎯 进入VR游戏';
+                        return;
+                    }
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        requiredFeatures: ['local-floor'],
+                        optionalFeatures: ['hand-tracking']
+                    });
+                    renderer.xr.setSession(session);
+                    showStatus('', 'info');
+                } catch (err) {
+                    console.error('VR启动失败:', err);
+                    showStatus('❌ VR启动失败: ' + err.message, 'error');
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎯 进入VR游戏';
+                }
+            });
+
+            renderer.xr.addEventListener('sessionend', () => {
+                enterVRBtn.disabled = false;
+                enterVRBtn.textContent = '🎯 进入VR游戏';
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+                showStatus('', 'info');
+                for (const ctrl of controllers) {
+                    if (ctrl.userData.laser) ctrl.userData.laser.visible = false;
+                }
+            });
+
+            renderer.xr.addEventListener('sessionstart', () => {
+                vrEntryEl.style.display = 'none';
+                vrHintsEl.style.display = 'none';
+                showStatus('', 'info');
+                initAudio();
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && renderer.xr.isPresenting) {
+                    exitVR();
+                }
+            });
+
+            console.log('🎈 VR射击气球游戏已就绪');
+        }
+
+        function showStatus(msg, type = 'info') {
+            statusMsgEl.innerHTML = msg;
+            statusMsgEl.className = type;
+            if (msg === '') statusMsgEl.style.display = 'none';
+        }
+
+        init();
+    </script>
+</body>
+</html>
