@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>☁️🎈 云上气球大作战</title>
+    <style>
+        :root { --bg: #0a1628; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg); overflow: hidden;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh; width: 100vw;
+            user-select: none; -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        }
+        canvas { display: block; }
+
+        /* ── HUD 得分面板 ── */
+        #hud {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+            display: flex; flex-direction: column; justify-content: flex-start;
+            align-items: center; padding-top: 24px;
+        }
+        #score-panel {
+            background: linear-gradient(135deg, rgba(100,180,255,0.25), rgba(200,230,255,0.2));
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 3px solid rgba(255,255,255,0.4); border-radius: 28px;
+            padding: 16px 40px; color: #fff; text-align: center;
+            pointer-events: auto; transition: all 0.3s ease;
+            box-shadow:
+                0 0 30px rgba(100,180,255,0.3),
+                0 8px 32px rgba(0,0,0,0.4),
+                inset 0 0 20px rgba(255,255,255,0.08);
+        }
+        #score-panel .label {
+            font-size: 14px; text-transform: uppercase; letter-spacing: 5px;
+            opacity: 0.9; font-weight: 600;
+            background: linear-gradient(90deg, #64b5f6, #fff, #64b5f6);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        #score-panel .score {
+            font-size: 60px; font-weight: 900; line-height: 1;
+            background: linear-gradient(135deg, #fff, #90caf9, #42a5f5);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 15px rgba(100,180,255,0.7));
+            animation: scoreGlow 2s ease-in-out infinite alternate;
+        }
+        @keyframes scoreGlow { from{filter:drop-shadow(0 0 10px rgba(100,180,255,0.5));} to{filter:drop-shadow(0 0 25px rgba(150,210,255,0.9));} }
+        #score-panel .combo {
+            font-size: 18px; color: #ffdd57; opacity: 0; transition: opacity 0.2s;
+            min-height: 26px; font-weight: 700; letter-spacing: 2px;
+        }
+        #score-panel .combo.active { opacity: 1; animation: comboBounce 0.5s cubic-bezier(0.68,-0.55,0.265,1.55); }
+        @keyframes comboBounce { 0%,100%{ transform: scale(1) translateY(0); } 50%{ transform: scale(1.4) translateY(-5px); } }
+
+        /* ── 关卡信息面板 ── */
+        #level-panel {
+            position: fixed; top: 120px; left: 50%; transform: translateX(-50%);
+            z-index: 10; pointer-events: none;
+            background: linear-gradient(135deg, rgba(60,60,80,0.7), rgba(30,30,50,0.8));
+            backdrop-filter: blur(12px);
+            border: 2px solid rgba(255,255,255,0.3); border-radius: 20px;
+            padding: 12px 28px; color: #fff; font-size: 16px; font-weight: 600;
+            letter-spacing: 2px; display: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        #level-panel.visible { display: block; animation: levelPulse 2s ease-in-out infinite; }
+        @keyframes levelPulse { 0%,100%{border-color:rgba(255,255,255,0.3);} 50%{border-color:rgba(100,200,255,0.7);} }
+
+        /* ── 提示文字（X键）── */
+        #x-key-hint {
+            position: fixed; bottom: 140px; left: 50%; transform: translateX(-50%);
+            z-index: 20; pointer-events: auto;
+            background: linear-gradient(135deg, rgba(255,152,0,0.85), rgba(255,87,34,0.85));
+            border: 2px solid rgba(255,255,255,0.5); border-radius: 18px;
+            padding: 14px 36px; color: #fff; font-size: 18px; font-weight: 800;
+            letter-spacing: 2px; cursor: default;
+            box-shadow: 0 0 30px rgba(255,152,0,0.5), 0 4px 15px rgba(0,0,0,0.3);
+            animation: hintBounce 1.5s ease-in-out infinite;
+            display: none;
+        }
+        @keyframes hintBounce { 0%,100%{transform:translateX(-50%) scale(1);} 50%{transform:translateX(-50%) scale(1.05);} }
+        #x-key-hint.storm-mode {
+            background: linear-gradient(135deg, rgba(63,81,181,0.9), rgba(21,101,192,0.9));
+            box-shadow: 0 0 30px rgba(63,81,181,0.6), 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        /* ── VR入口按钮 ── */
+        #vr-entry {
+            position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+            z-index: 20; pointer-events: auto;
+        }
+        #enter-vr-btn {
+            display: block; padding: 18px 56px; font-size: 22px; font-weight: 800;
+            letter-spacing: 3px; color: #fff;
+            background: linear-gradient(135deg, #42a5f5, #1e88e5, #90caf9);
+            background-size: 200% 200%;
+            animation: btnShimmer 3s ease infinite;
+            border: 3px solid rgba(255,255,255,0.3); border-radius: 60px;
+            cursor: pointer;
+            box-shadow: 0 0 40px rgba(66,165,245,0.6), inset 0 0 20px rgba(255,255,255,0.15);
+            text-transform: uppercase; outline: none; min-height: 52px;
+        }
+        @keyframes btnShimmer { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+        #enter-vr-btn:hover {
+            box-shadow: 0 0 60px rgba(66,165,245,0.9), inset 0 0 30px rgba(255,255,255,0.25);
+            transform: translateY(-4px) scale(1.05);
+        }
+        #enter-vr-btn:active { transform: scale(0.95); }
+        #enter-vr-btn:disabled { background: #444; box-shadow: none; cursor: not-allowed; opacity: 0.5; animation: none; }
+
+        /* ── 操作提示 ── */
+        #vr-hints {
+            position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+            z-index: 15; pointer-events: none; display: flex; gap: 18px; flex-wrap: wrap; justify-content: center;
+        }
+        .hint-badge {
+            background: linear-gradient(135deg, rgba(100,180,255,0.2), rgba(200,230,255,0.15));
+            border: 2px solid rgba(255,255,255,0.35); border-radius: 24px;
+            padding: 10px 22px; color: #fff; font-size: 14px; font-weight: 600;
+            letter-spacing: 1px; backdrop-filter: blur(8px); white-space: nowrap;
+            box-shadow: 0 0 15px rgba(100,180,255,0.2);
+        }
+        .hint-badge .key { font-weight: 800; color: #90caf9; text-shadow: 0 0 8px rgba(144,202,249,0.6); }
+
+        /* ── 状态消息 ── */
+        #status-msg {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            z-index: 30; color: #fff; font-size: 20px; font-weight: 700; text-align: center;
+            pointer-events: none; background: rgba(0,0,0,0.88); padding: 28px 40px;
+            border-radius: 20px; border: 3px solid rgba(100,180,255,0.5); display: none;
+        }
+        #status-msg.error { background: rgba(180,20,60,0.95); border-color: #ff3366; display: block !important; }
+        #status-msg.info { background: rgba(20,40,80,0.95); border-color: #42a5f5; display: block !important; }
+
+        /* ── 过渡覆盖层（VR内）── */
+        #vr-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 35; pointer-events: none; display: none;
+            justify-content: center; align-items: center;
+            background: rgba(0,0,0,0.4);
+        }
+        #vr-overlay .overlay-text {
+            color: #fff; font-size: 42px; font-weight: 900;
+            text-shadow: 0 0 40px #42a5f5, 0 0 80px #1e88e5;
+            animation: pulseText 1s ease-in-out infinite alternate;
+        }
+        @keyframes pulseText { from{opacity:0.7;transform:scale(0.95);} to{opacity:1;transform:scale(1.05);} }
+
+        /* 浮动得分 */
+        .float-score {
+            position: fixed; pointer-events: none; z-index: 50;
+            font-size: 32px; font-weight: 900; color: #ffd700;
+            text-shadow: 0 0 10px rgba(255,200,0,0.8), 0 2px 4px rgba(0,0,0,0.5);
+            animation: floatUp 1s ease-out forwards;
+        }
+        .float-score.golden {
+            font-size: 42px; color: #fff;
+            text-shadow: 0 0 20px #ffd700, 0 0 40px #ff8c00, 0 2px 4px rgba(0,0,0,0.5);
+            animation: floatUpGold 1.2s ease-out forwards;
+        }
+        @keyframes floatUp { 0%{opacity:1;transform:translateY(0) scale(0.5);} 100%{opacity:0;transform:translateY(-80px) scale(1.3);} }
+        @keyframes floatUpGold { 0%{opacity:1;transform:translateY(0) scale(0.3) rotate(-10deg);} 50%{transform:translateY(-40px) scale(1.5) rotate(5deg);} 100%{opacity:0;transform:translateY(-100px) scale(1) rotate(-5deg);} }
+
+        /* 闪电效果 */
+        @keyframes flashScreen { 0%{background:white;} 5%{background:transparent;} 100%{background:transparent;} }
+        .lightning-flash {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 28; pointer-events: none; display: none;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-dot { display: inline-block; width: 8px; height: 8px; margin: 0 3px; border-radius: 50%; background: #90caf9; animation: spin 0.8s linear infinite; }
+
+        /* ── 调试日志面板（左上角）── */
+        #debug-log {
+            position: fixed; top: 8px; left: 8px;
+            z-index: 9999; pointer-events: none;
+            max-width: min(380px, 90vw); max-height: 55vh;
+            overflow-y: auto; overflow-x: hidden;
+            background: rgba(0, 12, 30, 0.88);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 2px solid rgba(80, 180, 255, 0.5);
+            border-radius: 10px; padding: 8px 10px;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px; line-height: 1.55; color: #c8e6ff;
+            text-shadow: 0 0 4px rgba(100,180,255,0.3);
+            box-shadow: 0 4px 24px rgba(0,0,0,0.6), inset 0 0 15px rgba(80,180,255,0.08);
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin; scrollbar-color: rgba(80,180,255,0.4) transparent;
+        }
+        #debug-log::-webkit-scrollbar { width: 5px; }
+        #debug-log::-webkit-scrollbar-thumb { background: rgba(80,180,255,0.4); border-radius: 3px; }
+        .dbg-i  { color: #64b5f6; }   /* info — 蓝色 */
+        .dbg-w  { color: #ffd54f; }   /* warn — 黄色 */
+        .dbg-e  { color: #ef5350; }   /* error — 红色 */
+        .dbg-ok { color: #81c784; }   /* success — 绿色 */
+        .dbg-t  { color: #ba68c8; font-size:11px; opacity:0.7; } /* time */
+    </style>
+</head>
+<body>
+    <!-- HUD -->
+    <div id="hud">
+        <div id="score-panel">
+            <div class="label">🎯 得 分</div>
+            <div class="score" id="score-value">0</div>
+            <div class="combo" id="combo-text"></div>
+        </div>
+    </div>
+
+    <!-- 关卡提示 -->
+    <div id="level-panel">☁️ 第 1 关 — 云端乐园</div>
+
+    <!-- X键提示 -->
+    <div id="x-key-hint">⬆️ 按下 X 键 升空！</div>
+
+    <!-- VR 入口 -->
+    <div id="vr-entry"><button id="enter-vr-btn">☁️ 进入云上气球大战！</button></div>
+    <div id="vr-hints">
+        <span class="hint-badge">🔫 <span class="key">右手扳机</span> 自动步枪</span>
+        <span class="hint-badge">🔫 <span class="key">左手扳机</span> 手枪单发</span>
+        <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
+        <span class="hint-badge">⬆️ <span class="key">X键</span> 升空/下一关</span>
+        <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
+    </div>
+    <div id="status-msg"></div>
+    <div id="vr-overlay"><div class="overlay-text" id="overlay-text"></div></div>
+    <!-- 调试日志（左上角） -->
+    <div id="debug-log"></div>
+    <div class="lightning-flash" id="lightning-flash"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ════════════════════════════════════
+        //  DOM 元素
+        // ════════════════════════════════════
+        const scoreValueEl = document.getElementById('score-value');
+        const comboTextEl  = document.getElementById('combo-text');
+        const enterVRBtn   = document.getElementById('enter-vr-btn');
+        const statusMsgEl  = document.getElementById('status-msg');
+        const vrHintsEl    = document.getElementById('vr-hints');
+        const vrEntryEl    = document.getElementById('vr-entry');
+        const vrOverlay     = document.getElementById('vr-overlay');
+        const overlayText   = document.getElementById('overlay-text');
+        const levelPanelEl  = document.getElementById('level-panel');
+        const xKeyHintEl    = document.getElementById('x-key-hint');
+        const lightningEl   = document.getElementById('lightning-flash');
+        const debugLogEl    = document.getElementById('debug-log');
+
+        // ════════════════════════════════════
+        //  左上角调试日志面板
+        // ════════════════════════════════════
+        const DEBUG_MAX_LINES = 50;  // 最多保留行数，防止内存膨胀
+        let debugLineCount = 0;
+
+        /**
+         * 调试日志 — 同时输出到控制台 + 左上角可视化面板
+         * @param {string} msg   日志文本
+         * @param {'i'|'w'|'e'|'ok'} [level='i']  级别: info/warn/error/success
+         */
+        function debugLog(msg, level = 'i') {
+            const now = new Date();
+            const ts = now.toLocaleTimeString('zh-CN', { hour12:false }) + '.' + String(now.getMilliseconds()).padStart(3,'0');
+            const cls = `dbg-${level}`;
+
+            // 控制台输出
+            switch(level) {
+                case 'e': console.error(`[VR] ${msg}`); break;
+                case 'w': console.warn(`[VR] ${msg}`); break;
+                default:  console.log(`[VR] ${msg}`); break;
+            }
+
+            // 可视化面板
+            if (!debugLogEl) return;
+            const line = document.createElement('div');
+            line.innerHTML = `<span class="dbg-t">${ts}</span> <span class="${cls}">${escapeHtml(msg)}</span>`;
+            debugLogEl.appendChild(line);
+            debugLineCount++;
+
+            // 超过上限时移除旧行
+            if (debugLineCount > DEBUG_MAX_LINES) {
+                const first = debugLogEl.firstChild;
+                if (first) { debugLogEl.removeChild(first); debugLineCount--; }
+            }
+
+            // 自动滚到底部
+            debugLogEl.scrollTop = debugLogEl.scrollHeight;
+        }
+
+        /** HTML转义，防止XSS */
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // 启动日志
+        debugLog('📟 日志系统就绪', 'ok');
+
+        // ════════════════════════════════════
+        //  关卡系统
+        // ════════════════════════════════════
+        /** @type {'cloud'|'storm'} */
+        let currentLevel = 'cloud';       // 当前关卡
+        let gameActive    = false;         // VR 游戏是否激活
+        let isAscending   = false;         // 热气球上升中
+        let ascentTimer   = 0;             // 上升计时器（秒）
+        const ASCENT_DURATION = 5;         // 上升持续时间
+
+        // ════════════════════════════════════
+        //  游戏常量 & 状态
+        // ════════════════════════════════════
+        let score = 0, comboCount = 0, comboTimer;
+        const COMBO_TIMEOUT = 1500, BALLOON_POINTS = 10, GOLDEN_POINTS = 30;
+        const MAX_BALLOONS = 20, SPAWN_INTERVAL = 1800;
+        const SPAWN_RADIUS_MIN = 4, SPAWN_RADIUS_MAX = 14;
+        const SPAWN_HEIGHT_MIN = 1.2, SPAWN_HEIGHT_MAX = 4.5;
+        const MOVE_SPEED = 3.5, RAY_MAX_DISTANCE = 20, GOLDEN_CHANCE = 0.12;
+        const RIFLE_COOLDOWN = 120;
+        const DEADZONE = 0.2;
+
+        // 云层高度常量
+        const CLOUD_SURFACE_Y = 0;          // 云层表面 Y 坐标
+        const BALLOON_HEIGHT_ABOVE_CLOUD = 5; // 热气球距离云层高度
+        const BASKET_WIDTH  = 4;            // 篮子宽度 (X轴)
+        const BASKET_LENGTH = 8;            // 篮子长度 (Z轴)
+        const BASKET_HEIGHT = 2;            // 篮子高度 (墙壁)
+
+        const rightInput = { stickX: 0, stickY: 0, trigger: false };
+        const leftInput  = { stickX: 0, stickY: 0, trigger: false };
+
+        // ════════════════════════════════════
+        //  Three.js 初始化
+        // ════════════════════════════════════
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = false;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.3;
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+
+        // ════════════════════════════════════
+        //  天空（动态可切换）
+        // ════════════════════════════════════
+        const skyGeo = new THREE.SphereGeometry(95, 32, 32);
+        // 天空材质（可运行时修改颜色）
+        const skyMat = new THREE.ShaderMaterial({
+            side: THREE.BackSide,
+            uniforms: {
+                uTopColor:    { value: new THREE.Color(0x87CEEB) },  // 天蓝
+                uMidColor:    { value: new THREE.Color(0xB0E0E6) },  // 粉蓝
+                uBottomColor: { value: new THREE.Color(0xFFF8DC) },  // 玉米丝色
+                uOffset:      { value: 0.4 },
+                uExponent:    { value: 0.6 },
+            },
+            vertexShader: `
+                varying vec3 vWorldPosition;
+                void main() {
+                    vec4 worldPos = modelMatrix * vec4(position, 1.0);
+                    vWorldPosition = worldPos.xyz;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform vec3 uTopColor, uMidColor, uBottomColor;
+                uniform float uOffset, uExponent;
+                varying vec3 vWorldPosition;
+                void main() {
+                    float h = normalize(vWorldPosition).y + uOffset;
+                    float t = pow(max(h, 0.0), uExponent);
+                    vec3 col = mix(uBottomColor, uMidColor, smoothstep(0.0, 0.5, t));
+                    col = mix(col, uTopColor, smoothstep(0.5, 1.0, t));
+                    gl_FragColor = vec4(col, 1.0);
+                }`
+        });
+        const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+        scene.add(skyMesh);
+        scene.fog = new THREE.FogExp2(0xddeeff, 0.008);  // 轻薄雾气
+
+        // ════════════════════════════════════
+        //  相机 & 玩家（出生在篮子中心）
+        // ════════════════════════════════════
+        const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 100);
+        // 玩家出生点：篮子中心上方（眼睛高度 ~1.6m），篮子底部在 CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD
+        const PLAYER_SPAWN_Y = CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD + 1.6;
+        camera.position.set(0, PLAYER_SPAWN_Y, 0);
+        const dolly = new THREE.Group();
+        dolly.add(camera);
+        scene.add(dolly);
+
+        // 光照
+        scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+        const sunLight = new THREE.DirectionalLight(0xfff8e0, 1.8);
+        sunLight.position.set(20, 30, 10);
+        scene.add(sunLight);
+        const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0xE0F7FA, 0.9);
+        scene.add(hemiLight);
+
+        // ════════════════════════════════════════════════
+        //  ★★★ 场景一：厚厚的云层 ★★★
+        // ════════════════════════════════════════════════
+        const cloudLayerGroup = new THREE.Group();
+        scene.add(cloudLayerGroup);
+
+        /**
+         * 创建单个云朵团块（多个球体组合 + 半透明白色材质）
+         */
+        function createCloudPuff(centerX, centerY, centerZ, scale = 1) {
+            const puff = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 1.0,
+                metalness: 0.0,
+                transparent: true,
+                opacity: 0.75,
+                side: THREE.DoubleSide
+            });
+
+            // 用多个球体组成一朵蓬松的云
+            const sphereCount = 5 + Math.floor(Math.random() * 5);
+            for (let i = 0; i < sphereCount; i++) {
+                const r = (0.4 + Math.random() * 0.8) * scale;
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(r, 8, 8),
+                    cloudMat
+                );
+                sphere.position.set(
+                    (Math.random() - 0.5) * 2.5 * scale,
+                    (Math.random() - 0.5) * 1.0 * scale,
+                    (Math.random() - 0.5) * 2.5 * scale
+                );
+                puff.add(sphere);
+            }
+            puff.position.set(centerX, centerY, centerZ);
+            return puff;
+        }
+
+        /**
+         * 创建厚云层（多层云朵密集排列形成地面感）
+         */
+        function createThickCloudLayer() {
+            const group = new THREE.Group();
+            group.name = 'thickCloudLayer';
+
+            // 云层参数
+            const layerRadius = 50;          // 云层半径
+            const layers = 4;                 // 层数（厚度）
+            const puffsPerLayer = 80;         // 每层的云团数
+            const layerSpacing = 1.2;         // 层间距
+
+            for (let layer = 0; layer < layers; layer++) {
+                const yBase = CLOUD_SURFACE_Y - (layer - layers / 2) * layerSpacing;
+
+                for (let i = 0; i < puffsPerLayer; i++) {
+                    // 极坐标随机分布，中心更密
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = Math.pow(Math.random(), 0.5) * layerRadius;
+                    const x = Math.cos(angle) * r;
+                    const z = Math.sin(angle) * r;
+
+                    // 中心区域留空（给热气球和玩家活动空间）
+                    const distFromCenter = Math.sqrt(x*x + z*z);
+                    if (distFromCenter < 6 && layer === Math.floor(layers/2)) continue;
+
+                    const y = yBase + (Math.random() - 0.5) * 0.8;
+                    const scale = 0.8 + Math.random() * 1.5;
+
+                    const puff = createCloudPuff(x, y, z, scale);
+                    group.add(puff);
+                }
+            }
+
+            // 额外的底层支撑云（确保看不到下方）
+            for (let i = 0; i < 40; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 5 + Math.random() * (layerRadius - 5);
+                group.add(createCloudPuff(
+                    Math.cos(angle) * r,
+                    CLOUD_SURFACE_Y - layers * layerSpacing * 0.6 - Math.random(),
+                    Math.sin(angle) * r,
+                    1.5 + Math.random()
+                ));
+            }
+
+            return group;
+        }
+
+        const thickCloudLayer = createThickCloudLayer();
+        cloudLayerGroup.add(thickCloudLayer);
+
+        // ════════════════════════════════════════════════
+        //  ★★★ 热气球 + 篮子（核心场景物体）★★★
+        // ════════════════════════════════════════════════
+        const hotAirBalloonGroup = new THREE.Group();  // 整个热气球组（用于升空动画）
+        scene.add(hotAirBalloonGroup);
+
+        // 热气球整体位置：篮子底部在 CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD
+        // 篮子中心 Y = CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD + BASKET_HEIGHT/2
+        const basketCenterY = CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD + BASKET_HEIGHT / 2;
+        hotAirBalloonGroup.position.y = CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD;
+
+        /**
+         * 创建热气球囊（彩色条纹大气球）
+         */
+        function createBalloonEnvelope() {
+            const envelope = new THREE.Group();
+
+            // 气球主体 — 扁球体（宽 > 高）
+            const bodyGeo = new THREE.SphereGeometry(2.8, 32, 24);
+            // 压扁成热气球形状
+            bodyGeo.scale(1, 1.25, 1);
+
+            // 彩色条纹材质（使用 Shader 或简单多色面）
+            // 这里用程序化方式创建彩色气球表面
+            const stripeColors = [0xFF3333, 0xFFFF33, 0x33CC33, 0x3399FF, 0xFF9900, 0xFF33CC];
+
+            const bodyMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime: { value: 0 },
+                    uColors: {
+                        value: stripeColors.map(c => new THREE.Color(c))
+                    }
+                },
+                vertexShader: `
+                    varying vec3 vNormal;
+                    varying vec2 vUv;
+                    void main() {
+                        vNormal = normalize(normalMatrix * normal);
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    uniform float uTime;
+                    uniform vec3 uColors[6];
+                    varying vec3 vNormal;
+                    varying vec2 vUv;
+                    void main() {
+                        // 基于水平角度的彩虹条纹
+                        float angle = atan(vNormal.z, vNormal.x);
+                        float stripe = floor((angle / 3.14159 + 1.0) * 3.0 + uTime * 0.05);
+                        int idx = int(mod(stripe, 6.0));
+
+                        vec3 col = uColors[0];
+                        if(idx == 1) col = uColors[1];
+                        else if(idx == 2) col = uColors[2];
+                        else if(idx == 3) col = uColors[3];
+                        else if(idx == 4) col = uColors[4];
+                        else if(idx == 5) col = uColors[5];
+
+                        // 底部渐变到深色
+                        float bottomFade = smoothstep(-0.5, 0.5, vNormal.y);
+                        col = mix(col * 0.5, col, bottomFade);
+
+                        // 高光
+                        vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
+                        float diff = max(dot(vNormal, lightDir), 0.0) * 0.4 + 0.6;
+                        col *= diff;
+
+                        gl_FragColor = vec4(col, 1.0);
+                    }
+                `
+            });
+
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.position.y = 5.5;  // 气球主体在篮子上方
+            envelope.add(body);
+            envelope.userData.bodyMesh = body;
+            envelope.userData.bodyMat = bodyMat;
+
+            // 气球底部收口
+            const neckGeo = new THREE.ConeGeometry(0.6, 1.2, 16);
+            const neckMat = new THREE.MeshStandardMaterial({ color: 0xCC2200, roughness: 0.6 });
+            const neck = new THREE.Mesh(neckGeo, neckMat);
+            neck.position.set(0, 4.0, 0);
+            neck.rotation.x = Math.PI;
+            envelope.add(neck);
+
+            return envelope;
+        }
+
+        /**
+         * 创建燃烧器火焰
+         */
+        function createBurner(parent) {
+            const burner = new THREE.Group();
+
+            // 燃烧器金属架
+            const frameGeo = new THREE.CylinderGeometry(0.25, 0.3, 0.4, 8);
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.3 });
+            const frame = new THREE.Mesh(frameGeo, frameMat);
+            frame.position.y = 4.45;
+            burner.add(frame);
+
+            // 火焰（初始透明）
+            const flameGeo = new THREE.ConeGeometry(0.35, 1.2, 12);
+            const flameMat = new THREE.MeshBasicMaterial({
+                color: 0xFF6600,
+                transparent: true,
+                opacity: 0
+            });
+            const flame = new THREE.Mesh(flameGeo, flameMat);
+            flame.position.set(0, 4.8, 0);
+            burner.add(flame);
+            burner.userData.flame = flame;
+            burner.userData.flameMat = flameMat;
+
+            parent.add(burner);
+            return burner;
+        }
+
+        /**
+         * 创建绳索（从气球底部四角连到篮子四角）
+         */
+        function createRopes(envelopeBottomY, basketTopY) {
+            const ropeGroup = new THREE.Group();
+            const ropeMat = new THREE.LineBasicMaterial({ color: 0x996633, linewidth: 2 });
+
+            // 篮子四角位置（相对于 hotAirBalloonGroup）
+            const halfW = BASKET_WIDTH / 2;
+            const halfL = BASKET_LENGTH / 2;
+            const basketCorners = [
+                [-halfW, basketTopY - hotAirBalloonGroup.position.y, -halfL],
+                [ halfW, basketTopY - hotAirBalloonGroup.position.y, -halfL],
+                [-halfW, basketTopY - hotAirBalloonGroup.position.y,  halfL],
+                [ halfW, basketTopY - hotAirBalloonGroup.position.y,  halfL],
+            ];
+
+            // 气球底部连接点
+            const ropeAttachY = envelopeBottomY - hotAirBalloonGroup.position.y;
+            const attachPoints = [
+                [-1.0, ropeAttachY, -0.8],
+                [ 1.0, ropeAttachY, -0.8],
+                [-1.0, ropeAttachY,  0.8],
+                [ 1.0, ropeAttachY,  0.8],
+            ];
+
+            for (let i = 0; i < 4; i++) {
+                const pts = [];
+                const start = new THREE.Vector3(...attachPoints[i]);
+                const end   = new THREE.Vector3(...basketCorners[i]);
+
+                // 绳索稍微弯曲（中间点偏移）
+                const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+                mid.y -= 0.3;  // 下垂
+
+                pts.push(start, mid, end);
+                const geo = new THREE.BufferGeometry().setFromPoints(pts);
+                const rope = new THREE.Line(geo, ropeMat);
+                ropeGroup.add(rope);
+            }
+
+            return ropeGroup;
+        }
+
+        /**
+         * 创建篮子（4m宽 × 2m高 × 8m长）
+         */
+        function createBasket() {
+            const basket = new THREE.Group();
+
+            const hw = BASKET_WIDTH  / 2;  // 2
+            const hh = BASKET_HEIGHT / 2;  // 1
+            const hl = BASKET_LENGTH / 2;  // 4
+
+            // 编织藤条材质
+            const wickerMat = new THREE.MeshStandardMaterial({
+                color: 0xB8860B,
+                roughness: 0.85,
+                metalness: 0.05
+            });
+            const wickerDarkMat = new THREE.MeshStandardMaterial({
+                color: 0x8B6914,
+                roughness: 0.9,
+                metalness: 0.02
+            });
+
+            // 地板
+            const floorGeo = new THREE.BoxGeometry(BASKET_WIDTH, 0.15, BASKET_LENGTH);
+            const floor = new THREE.Mesh(floorGeo, wickerMat);
+            floor.position.y = -hh;
+            basket.add(floor);
+
+            // 四面墙壁（薄板 + 边框）
+            const wallThickness = 0.08;
+            const wallHeight = BASKET_HEIGHT;
+
+            // 前/后墙（Z方向）
+            for (const zSign of [-1, 1]) {
+                const wallGeo = new THREE.BoxGeometry(BASKET_WIDTH, wallHeight, wallThickness);
+                const wall = new THREE.Mesh(wallGeo, wickerDarkMat);
+                wall.position.set(0, 0, zSign * hl);
+                basket.add(wall);
+
+                // 上下边框
+                for (const ySign of [-1, 1]) {
+                    const railGeo = new THREE.BoxGeometry(BASKET_WIDTH + 0.06, 0.1, 0.12);
+                    const rail = new THREE.Mesh(railGeo, wickerMat);
+                    rail.position.set(0, ySign * hh * 0.92, zSign * hl);
+                    basket.add(rail);
+                }
+            }
+
+            // 左/右墙（X方向）
+            for (const xSign of [-1, 1]) {
+                const wallGeo = new THREE.BoxGeometry(wallThickness, wallHeight, BASKET_LENGTH);
+                const wall = new THREE.Mesh(wallGeo, wickerDarkMat);
+                wall.position.set(xSign * hw, 0, 0);
+                basket.add(wall);
+
+                // 上下边框
+                for (const ySign of [-1, 1]) {
+                    const railGeo = new THREE.BoxGeometry(0.12, 0.1, BASKET_LENGTH + 0.06);
+                    const rail = new THREE.Mesh(railGeo, wickerMat);
+                    rail.position.set(xSign * hw * 0.98, ySign * hh * 0.92, 0);
+                    basket.add(rail);
+                }
+            }
+
+            // 四个立柱角
+            for (const xSign of [-1, 1]) {
+                for (const zSign of [-1, 1]) {
+                    const postGeo = new THREE.CylinderGeometry(0.07, 0.09, wallHeight, 6);
+                    const post = new THREE.Mesh(postGeo, wickerMat);
+                    post.position.set(xSign * hw * 0.96, 0, zSign * hl * 0.96);
+                    basket.add(post);
+                }
+            }
+
+            // 内部装饰：沙袋
+            const sandbagGeo = new THREE.BoxGeometry(0.6, 0.3, 0.4);
+            const sandMat = new THREE.MeshStandardMaterial({ color: 0xD2B48C, roughness: 0.95 });
+            for (let i = 0; i < 4; i++) {
+                const sb = new THREE.Mesh(sandbagGeo, sandMat);
+                sb.position.set(
+                    (Math.floor(i/2)-0.5) * hw * 0.6,
+                    -hh + 0.22,
+                    ((i%2)*2-1) * hl * 0.65
+                );
+                sb.rotation.y = (Math.random()-0.5) * 0.3;
+                basket.add(sb);
+            }
+
+            basket.name = 'basket';
+            return basket;
+        }
+
+        // 组装完整热气球
+        const envelope = createBalloonEnvelope();
+        hotAirBalloonGroup.add(envelope);
+
+        const burner = createBurner(hotAirBalloonGroup);
+        const ropes = createRopes(4.0, CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD);
+        hotAirBalloonGroup.add(ropes);
+
+        const basket = createBasket();
+        // 篮子位置：底部在 BALLOON_HEIGHT_ABOVE_CLOUD 高度
+        basket.position.y = 0;
+        hotAirBalloonGroup.add(basket);
+
+        // 热气球轻微摇摆动画参数
+        hotAirBalloonGroup.userData.swayPhase = 0;
+        hotAirBalloonGroup.userData.swayAmount = 0.03;
+
+        // ════════════════════════════════════
+        //  派对灯光（围绕热气球旋转）
+        // ════════════════════════════════════
+        const partyLights = [];
+        const rainbowColors = [0xff3366, 0xff9933, 0xffff33, 0x33ff66, 0x3399ff, 0xcc33ff];
+        for (let i = 0; i < 6; i++) {
+            const light = new THREE.PointLight(rainbowColors[i], 1.5, 20);
+            const angle = (i / 6) * Math.PI * 2;
+            light.position.set(
+                Math.cos(angle) * 8,
+                PLAYER_SPAWN_Y + 2 + Math.random()*3,
+                Math.sin(angle) * 8
+            );
+            scene.add(light);
+            partyLights.push({
+                light, angle,
+                speed: 0.2 + Math.random() * 0.3,
+                radius: 7 + Math.random() * 5,
+                yOffset: PLAYER_SPAWN_Y + 1 + Math.random() * 4
+            });
+        }
+
+        // ════════════════════════════════════
+        //  气球目标系统（保留原有逻辑）
+        // ════════════════════════════════════
+        const balloons = [], balloonGroup = new THREE.Group();
+        scene.add(balloonGroup);
+        const goldenColor = 0xffd700;
+        function createBalloonMesh(color){
+            const g=new THREE.Group();
+            const body=new THREE.Mesh(new THREE.SphereGeometry(0.35,24,20),new THREE.MeshStandardMaterial({color,roughness:0.2,metalness:0.05,emissive:color,emissiveIntensity:0.25}));
+            body.name='balloonBody';g.add(body);
+            g.add(new THREE.Mesh(new THREE.ConeGeometry(0.06,0.14,8,8),new THREE.MeshStandardMaterial({color:new THREE.Color(color).multiplyScalar(0.6),roughness:0.5})).translateY(-0.38));
+            g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.015,0.025,0.22,6),new THREE.MeshStandardMaterial({color:0xcccccc,roughness:0.6})).translateY(-0.5));
+            const hl=new THREE.Mesh(new THREE.SphereGeometry(0.09,8,6),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.6}));
+            hl.position.set(0.13,0.17,0.13);g.add(hl);
+            const glow=new THREE.Mesh(new THREE.SphereGeometry(0.45,16,12),new THREE.MeshBasicMaterial({color,transparent:true,opacity:0.12,side:THREE.BackSide}));
+            g.add(glow);g.userData={bodyMesh:body,bodyMaterial:body.material};return g;
+        }
+
+        function spawnBalloon(forceGolden=false){
+            if(balloons.length>=MAX_BALLOONS)removeOldestBalloon();
+            const isGolden=forceGolden||Math.random()<GOLDEN_CHANCE;
+            const color=isGolden?goldenColor:balloonColors[Math.floor(Math.random()*balloonColors.length)];
+            const b=createBalloonMesh(color);
+            b.userData.isGolden=isGolden;b.userData.color=color;
+            b.userData.baseY=SPAWN_HEIGHT_MIN+Math.random()*(SPAWN_HEIGHT_MAX-SPAWN_HEIGHT_MIN)+PLAYER_SPAWN_Y-1;
+            b.userData.floatSpeed=0.5+Math.random()*1.8;b.userData.floatAmp=0.15+Math.random()*0.6;
+            b.userData.floatPhase=Math.random()*Math.PI*2;
+            b.userData.driftX=(Math.random()-0.5)*0.4;b.userData.driftZ=(Math.random()-0.5)*0.4;
+            b.userData.points=isGolden?GOLDEN_POINTS:BALLOON_POINTS;
+            const pos=dolly.position;const angle=Math.random()*Math.PI*2;
+            const r=SPAWN_RADIUS_MIN+Math.random()*(SPAWN_MAX_RADIUS-SPAWN_RADIUS_MIN);
+            b.position.set(pos.x+Math.cos(angle)*r,b.userData.baseY,pos.z+Math.sin(angle)*r);
+            b.userData.spawnPos=b.position.clone();
+            if(isGolden){b.userData.bodyMaterial.emissive=new THREE.Color(goldenColor);b.userData.bodyMaterial.emissiveIntensity=0.7;b.scale.setScalar(0.9);const goldGlow=new THREE.Mesh(new THREE.SphereGeometry(0.6,16,12),new THREE.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:0.15,side:THREE.BackSide}));b.add(goldGlow);}
+            balloonGroup.add(b);balloons.push(b);return b;
+        }
+
+        // 暴风雨模式下的生成范围更大
+        const SPAWN_MAX_RADIUS = 18;
+
+        const balloonColors=[0xff3b3b,0xff6b35,0xffc635,0x4caf50,0x2196f3,0x9c27b0,0xe91e63,0x00bcd4,0xff9800,0x8bc34a];
+
+        function removeOldestBalloon(){
+            if(!balloons.length)return;const old=balloons.shift();const start=performance.now(),duration=800,startPos=old.position.clone();
+            const rise=3+Math.random()*4,dx=(Math.random()-0.5)*2,dz=(Math.random()-0.5)*2;
+            function anim(t){const e=Math.min((t-start)/duration,1);old.position.set(startPos.x+dx*e*e,startPos.y+rise*e*e,startPos.z+dz*e*e);old.scale.setScalar(1-e*0.7);old.userData.bodyMaterial.opacity=1-e;old.userData.bodyMaterial.transparent=true;if(e<1)requestAnimationFrame(anim);else disposeBalloon(old);}
+            requestAnimationFrame(anim);
+        }
+        function disposeBalloon(b){balloonGroup.remove(b);b.traverse(c=>{if(c.geometry&&c.geometry!==b.userData.bodyMesh?.geometry)c.geometry.dispose();if(c.material)Array.isArray(c.material)?c.material.forEach(m=>m.dispose()):c.material.dispose();});b.userData.bodyMaterial?.dispose();b.userData.bodyMesh?.geometry?.dispose();}
+
+        // 碎片系统
+        const debris=[],debrisGroup=new THREE.Group();scene.add(debrisGroup);
+        function createDebris(position,color,isGolden=false){
+            const count=isGolden?22:14;const baseColor=new THREE.Color(color);
+            for(let i=0;i<count;i++){
+                const size=0.03+Math.random()*0.07;const geom=Math.random()>0.5?new THREE.BoxGeometry(size,size,size):new THREE.TetrahedronGeometry(size);
+                const mat=new THREE.MeshStandardMaterial({color:baseColor.clone().multiplyScalar(0.7+Math.random()*0.5),roughness:0.6,emissive:isGolden?goldenColor:color,emissiveIntensity:isGolden?0.4:0.15,transparent:true,opacity:1});
+                const piece=new THREE.Mesh(geom,mat);piece.position.copy(position);piece.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+                const dir=new THREE.Vector3((Math.random()-0.5)*2,Math.random()*2+0.5,(Math.random()-0.5)*2).normalize();const speed=2+Math.random()*5;
+                piece.userData={velocity:dir.multiplyScalar(speed),rotSpeed:new THREE.Vector3((Math.random()-0.5)*15,(Math.random()-0.5)*15,(Math.random()-0.5)*15),life:5,grounded:false,material:mat};
+                debrisGroup.add(piece);debris.push(piece);
+            }
+            if(isGolden)for(let i=0;i<12;i++){const sg=new THREE.OctahedronGeometry(0.06);const sm=new THREE.MeshBasicMaterial({color:0xffd700,transparent:true,opacity:1});const star=new THREE.Mesh(sg,sm);star.position.copy(position);const sd=new THREE.Vector3((Math.random()-0.5)*3,Math.random()*3,(Math.random()-0.5)*3).normalize().multiplyScalar(3+Math.random()*4);star.userData={velocity:sd,rotSpeed:new THREE.Vector3((Math.random()-0.5)*20,(Math.random()-0.5)*20,(Math.random()-0.5)*20),life:3,grounded:false,material:sm,isStar:true};debrisGroup.add(star);debris.push(star);}
+        }
+
+        function updateDebris(dt){
+            for(let i=debris.length-1;i>=0;i--){const d=debris[i],ud=d.userData;
+                if(!ud.grounded){d.position.x+=ud.velocity.x*dt;d.position.y+=ud.velocity.y*dt;d.position.z+=ud.velocity.z*dt;d.rotation.x+=ud.rotSpeed.x*dt;d.rotation.y+=ud.rotSpeed.y*dt;d.rotation.z+=ud.rotSpeed.z*dt;ud.velocity.y-=9.8*dt;if(d.position.y<=CLOUD_SURFACE_Y-5){d.position.y=CLOUD_SURFACE_Y-5;ud.grounded=true;ud.velocity.set(0,0,0);}}
+                else{ud.life-=dt;if(ud.life<=0||(ud.life<0.5&&ud.material.opacity<=0.05)){ud.material.dispose();d.geometry.dispose();debrisGroup.remove(d);debris.splice(i,1);}else{const fadeTime=0.5,remaining=Math.max(0,ud.life-4.5);ud.material.opacity=Math.min(1,remaining/fadeTime);d.rotation.y+=ud.rotSpeed.y*dt*0.3;}}
+            }
+        }
+
+        // 音频
+        let audioCtx;
+        function initAudio(){if(!audioCtx){try{audioCtx=new(window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();}
+        function playPopSound(isGolden=false){if(!audioCtx)return;try{
+            const now=audioCtx.currentTime,dur=isGolden?0.35:0.18;const buf=audioCtx.createBuffer(1,Math.floor(audioCtx.sampleRate*dur),audioCtx.sampleRate);const data=buf.getChannelData(0);
+            for(let i=0;i<buf.length;i++){const t=i/audioCtx.sampleRate,env=Math.exp(-t*(isGolden?14:22));data[i]=(Math.random()*2-1)*env*0.75+Math.sin(t*(isGolden?900:550)*Math.PI*2)*env*0.45+Math.sin(t*(isGolden?1400:800)*Math.PI*2)*env*0.25;}
+            const src=audioCtx.createBufferSource();src.buffer=buf;const gain=audioCtx.createGain();gain.gain.setValueAtTime(isGolden?0.75:0.48,now);gain.gain.exponentialRampToValueAtTime(0.001,now+dur);src.connect(gain);gain.connect(audioCtx.destination);src.start(now);src.stop(now+dur);
+        }catch(e){}}
+        function playShootSound(){if(!audioCtx)return;try{
+            const now=audioCtx.currentTime,dur=0.08;const buf=audioCtx.createBuffer(1,Math.floor(audioCtx.sampleRate*dur),audioCtx.sampleRate);const data=buf.getChannelData(0);
+            for(let i=0;i<buf.length;i++){const t=i/audioCtx.sampleRate;data[i]=(Math.random()*2-1)*Math.exp(-t*55)*0.8+Math.sin(t*300*Math.PI*2)*Math.exp(-t*80)*0.3;}
+            const src=audioCtx.createBufferSource();src.buffer=buf;const gain=audioCtx.createGain();gain.gain.setValueAtTime(0.3,now);gain.gain.exponentialRampToValueAtTime(0.001,now+dur);src.connect(gain);gain.connect(audioCtx.destination);src.start(now);src.stop(now+dur);
+        }catch(e){}}
+
+        // 得分
+        function showFloatScore(pts,isGolden){const el=document.createElement('div');el.className='float-score'+(isGolden?' golden':'');el.textContent='+'+pts;el.style.left=(50+(Math.random()-0.5)*30)+'%';el.style.top=(35+Math.random()*15)+'%';document.body.appendChild(el);setTimeout(()=>el.remove(),1200);}
+        function addScore(pts,isGolden){
+            score+=pts;scoreValueEl.textContent=score;scoreValueEl.style.transform='scale(1.35)';setTimeout(()=>scoreValueEl.style.transform='scale(1)',150);showFloatScore(pts,isGolden);
+            comboCount++;if(comboTimer)clearTimeout(comboTimer);
+            comboTimer=setTimeout(()=>{comboCount=0;comboTextEl.textContent='';comboTextEl.classList.remove('active');},COMBO_TIMEOUT);
+            if(comboCount>=3){comboTextEl.textContent=`🔥 ${comboCount}连击！`;comboTextEl.classList.add('active');setTimeout(()=>comboTextEl.classList.remove('active'),600);}
+            else if(isGolden){comboTextEl.textContent='⭐ 金色气球！！';comboTextEl.classList.add('active');setTimeout(()=>comboTextEl.classList.remove('active'),600);}
+        }
+
+        // ════════════════════════════════════
+        //  控制器、枪支、激光、子弹（完全保留）
+        // ════════════════════════════════════
+        const controllers=[];let leftController,rightController;
+
+        function createLaserPointer(isRight=false){const geo=new THREE.CylinderGeometry(0.002,0.002,1,6);geo.rotateX(Math.PI/2);geo.translate(0,0.015,-0.12-0.5);const mat=new THREE.MeshBasicMaterial({color:isRight?0xff2222:0x2288ff,transparent:true,opacity:0.5});const laser=new THREE.Mesh(geo,mat);laser.visible=true;laser.name='laserPointer';return laser;}
+
+        function createRightGunModel(){
+            const gun=new THREE.Group();
+            gun.add(new THREE.Mesh(new THREE.BoxGeometry(0.04,0.06,0.12),new THREE.MeshStandardMaterial({color:0xff6622,roughness:0.35,metalness:0.1,emissive:0xff3300,emissiveIntensity:0.15})).translateY(-0.02));
+            const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.015,0.14,10),new THREE.MeshStandardMaterial({color:0xcccccc,roughness:0.15,metalness:0.9}));
+            barrel.rotation.x=Math.PI/2;barrel.position.set(0,0.02,-0.11);gun.add(barrel);
+            const muzzleTip=new THREE.Mesh(new THREE.CylinderGeometry(0.016,0.012,0.025,10),new THREE.MeshBasicMaterial({color:0xff2200,transparent:true,opacity:0.8}));
+            muzzleTip.rotation.x=Math.PI/2;muzzleTip.position.set(0,0.02,-0.185);gun.add(muzzleTip);gun.userData.muzzleTip=muzzleTip;
+            const grip=new THREE.Mesh(new THREE.BoxGeometry(0.03,0.09,0.045),new THREE.MeshStandardMaterial({color:0x2244aa,roughness:0.7,metalness:0.05}));grip.position.set(0,-0.085,0.025);grip.rotation.x=0.25;gun.add(grip);
+            gun.add(new THREE.Mesh(new THREE.BoxGeometry(0.022,0.06,0.035),new THREE.MeshStandardMaterial({color:0x22aa55,roughness:0.5,metalness:0.2})).translateY(-0.065));
+            const sight=new THREE.Mesh(new THREE.BoxGeometry(0.006,0.025,0.006),new THREE.MeshBasicMaterial({color:0xffd700,emissive:0xffaa00}));sight.position.set(0,0.065,-0.08);gun.add(sight);
+            const stripeL=new THREE.Mesh(new THREE.BoxGeometry(0.002,0.03,0.08),new THREE.MeshBasicMaterial({color:0xffdd00}));stripeL.position.set(-0.021,0.005,-0.02);gun.add(stripeL);const stripeR=stripeL.clone();stripeR.position.x=0.021;gun.add(stripeR);
+            gun.userData.recoilAmount=0;return gun;
+        }
+
+        function createLeftGunModel(){
+            const gun=new THREE.Group();
+            gun.add(new THREE.Mesh(new THREE.BoxGeometry(0.032,0.05,0.09),new THREE.MeshStandardMaterial({color:0xaa22ff,roughness:0.3,metalness:0.1,emissive:0x8800cc,emissiveIntensity:0.15})));
+            const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.01,0.012,0.1,8),new THREE.MeshStandardMaterial({color:0xdddddd,roughness:0.1,metalness:0.95}));barrel.rotation.x=Math.PI/2;barrel.position.set(0,0.015,-0.065);gun.add(barrel);
+            const muzzleTip=new THREE.Mesh(new THREE.CylinderGeometry(0.014,0.01,0.02,8),new THREE.MeshBasicMaterial({color:0x22aaff,transparent:true,opacity:0.8}));muzzleTip.rotation.x=Math.PI/2;muzzleTip.position.set(0,0.015,-0.125);gun.add(muzzleTip);gun.userData.muzzleTip=muzzleTip;
+            const grip=new THREE.Mesh(new THREE.BoxGeometry(0.026,0.075,0.038),new THREE.MeshStandardMaterial({color:0xff3388,roughness:0.65,metalness:0.05}));grip.position.set(0,-0.07,0.02);grip.rotation.x=0.28;gun.add(grip);
+            const guard=new THREE.Mesh(new THREE.TorusGeometry(0.018,0.004,8,8,Math.PI),new THREE.MeshStandardMaterial({color:0xcccccc,roughness:0.2,metalness:0.8}));guard.position.set(0,-0.04,0.045);guard.rotation.x=Math.PI/2;gun.add(guard);
+            const star=new THREE.Mesh(new THREE.OctahedronGeometry(0.012),new THREE.MeshBasicMaterial({color:0x00ffff}));star.position.set(0,0.035,-0.04);gun.add(star);
+            gun.userData.recoilAmount=0;return gun;
+        }
+
+        function createMuzzleFlash(parent,colorHex){
+            const flash=new THREE.Group();
+            flash.add(new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0})));
+            flash.add(new THREE.Mesh(new THREE.SphereGeometry(0.1,8,8),new THREE.MeshBasicMaterial({color:colorHex,transparent:true,opacity:0})));
+            const rays=new THREE.Group();for(let i=0;i<6;i++){const ray=new THREE.Mesh(new THREE.ConeGeometry(0.015,0.12,4),new THREE.MeshBasicMaterial({color:colorHex,transparent:true,opacity:0}));ray.position.set(0,0,-0.06);ray.rotation.z=(i/6)*Math.PI*2;ray.rotation.x=Math.PI/2+(Math.random()-0.5)*0.5;rays.add(ray);}flash.add(rays);
+            flash.position.set(0,0.015,-0.19);parent.add(flash);flash.userData.active=false;flash.userData.timer=0;return flash;
+        }
+
+        function applyRecoil(gunMesh,strength=1){gunMesh.userData.recoilStrength=strength;gunMesh.userData.recoilTime=0;}
+        function updateRecoils(dt){
+            [rightController,leftController].forEach(ctrl=>{
+                if(!ctrl?.userData.gunModel)return;const gun=ctrl.userData.gunModel;
+                if(gun.userData.recoilStrength!==undefined&&gun.userData.recoilTime!==undefined){
+                    const totalDur=0.1;gun.userData.recoilTime+=dt;const t=gun.userData.recoilTime/totalDur;
+                    if(t>=1){gun.position.set(0,0,0);delete gun.userData.recoilStrength;delete gun.userData.recoilTime;}
+                    else{gun.position.set(0,0,gun.userData.recoilStrength*0.04*Math.max(0,1-t*4));gun.rotation.x=gun.userData.recoilStrength*0.05*Math.max(0,1-t*3);}
+                }
+            });
+            [leftController,rightController].forEach(ctrl=>{
+                if(!ctrl?.userData.muzzleFlash)return;const mf=ctrl.userData.muzzleFlash;
+                if(mf.userData.active){mf.userData.timer-=dt;if(mf.userData.timer<=0){mf.userData.active=false;mf.children.forEach(c=>{c.material.opacity=0;});}
+                else{const fade=mf.userData.timer/0.06;mf.children.forEach(c=>{c.material.opacity=fade;});mf.scale.setScalar(1+(1-fade)*2);}
+            });
+        }
+        function triggerMuzzleFlash(controller){if(!controller?.userData.muzzleFlash)return;const mf=controller.userData.muzzleFlash;mf.userData.active=true;mf.userData.timer=0.06;mf.children.forEach(c=>{c.material.opacity=1;});mf.scale.setScalar(1);}
+
+        // 左手得分面板
+        let leftScoreCanvas,leftScoreTexture,leftScorePlane;
+        function createLeftControllerScore(){leftScoreCanvas=document.createElement('canvas');leftScoreCanvas.width=320;leftScoreCanvas.height=96;leftScoreTexture=new THREE.CanvasTexture(leftScoreCanvas);const m=new THREE.MeshBasicMaterial({map:leftScoreTexture,transparent:true});const g=new THREE.PlaneGeometry(0.2,0.06);leftScorePlane=new THREE.Mesh(g,m);leftScorePlane.rotation.x=-0.3;leftScorePlane.position.set(-0.08,-0.08,-0.1);return leftScorePlane;}
+        function updateLeftScoreDisplay(){
+            if(!leftScoreCanvas||!leftScoreTexture)return;
+            const ctx=leftScoreCanvas.getContext('2d'),W=leftScoreCanvas.width,H=leftScoreCanvas.height;
+            ctx.clearRect(0,0,W,H);ctx.fillStyle='rgba(30,0,50,0.8)';roundRect(ctx,4,4,W-8,H-8,14);ctx.fill();
+            const grad=ctx.createLinearGradient(0,0,W,0);grad.addColorStop(0,'#ff3366');grad.addColorStop(0.33,'#ffaa00');grad.addColorStop(0.66,'#33ff77');grad.addColorStop(1,'#3388ff');ctx.strokeStyle=grad;ctx.lineWidth=3;roundRect(ctx,4,4,W-8,H-8,14);ctx.stroke();
+            ctx.fillStyle='#ffdd00';ctx.font='bold 22px "Segoe UI","PingFang SC",sans-serif';ctx.textAlign='center';ctx.fillText(`SCORE ${score}`,W/2,H*0.38);ctx.fillStyle='#ffffff';ctx.font='bold 36px "Segoe UI","PingFang SC",sans-serif';ctx.fillText(`${score}`,W/2,H*0.82);leftScoreTexture.needsUpdate=true;
+        }
+        function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.quadraticCurveTo(x+w,y,x+w,y+r);ctx.lineTo(x+w,y+h-r);ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);ctx.lineTo(x+r,y+h);ctx.quadraticCurveTo(x+h,y+h,x,y+h-r);ctx.lineTo(x,y+r);ctx.quadraticCurveTo(x,y,x+r,y);ctx.closePath();}
+
+        // 子弹
+        const bullets=[],bulletGroup=new THREE.Group();scene.add(bulletGroup);
+        function spawnBullet(origin,direction,isRightHand=false){
+            const speed=15;let geom,mat,trail;
+            if(isRightHand){geom=new THREE.BoxGeometry(0.045,0.045,0.045);mat=new THREE.MeshStandardMaterial({color:0xffaa00,emissive:0xff4400,emissiveIntensity:0.6,roughness:0.2,metalness:0.5});trail=new THREE.Mesh(new THREE.CylinderGeometry(0.008,0.015,0.15,6),new THREE.MeshBasicMaterial({color:0xff6600,transparent:true,opacity:0.5}));trail.rotation.x=Math.PI/2;trail.position.z=0.09;}
+            else{geom=new THREE.SphereGeometry(0.03,10,8);mat=new THREE.MeshStandardMaterial({color:0x44ccff,emissive:0x0088ff,emissiveIntensity:0.6,roughness:0.15,metalness:0.4});trail=new THREE.Mesh(new THREE.CylinderGeometry(0.006,0.012,0.12,6),new THREE.MeshBasicMaterial({color:0x2299ff,transparent:true,opacity:0.5}));trail.rotation.x=Math.PI/2;trail.position.z=0.07;}
+            const bullet=new THREE.Group();bullet.add(new THREE.Mesh(geom,mat));if(trail)bullet.add(trail);bullet.position.copy(origin);bullet.lookAt(origin.clone().add(direction));bullet.userData={velocity:direction.clone().normalize().multiplyScalar(speed),life:1.5};bulletGroup.add(bullet);bullets.push(bullet);
+        }
+
+        let leftTriggerWas=false;
+        function shoot(controller){try{const{origin,direction}=getControllerRay(controller);if(!Number.isFinite(origin.x)||!Number.isFinite(direction.x))return;spawnBullet(origin,direction,controller===rightController);playShootSound();triggerMuzzleFlash(controller);if(controller.userData.gunModel)applyRecoil(controller.userData.gunModel,controller===rightController?1:0.7);}catch(e){console.error('shoot:',e)}}
+
+        function updateBullets(dt){const _bp=new THREE.Vector3(),_balp=new THREE.Vector3();
+            for(let i=bullets.length-1;i>=0;i--){const b=bullets[i],ud=b.userData;ud.life-=dt;b.position.x+=ud.velocity.x*dt;b.position.y+=ud.velocity.y*dt;b.position.z+=ud.velocity.z*dt;b.lookAt(b.position.clone().add(ud.velocity));let hit=false;
+                if(ud.life>0&&balloons.length>0){_bp.copy(b.position);for(let j=balloons.length-1;j>=0;j--){const bal=balloons[j];_balp.copy(bal.position);if(_bp.distanceTo(_balp)<0.42){hit=true;destroyBalloon(bal,_balp.clone());break;}}}
+                if(hit||ud.life<=0||Math.abs(b.position.y)>60||Math.abs(b.position.x)>70||Math.abs(b.position.z)>70){b.traverse(c=>{if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose()});bulletGroup.remove(b);bullets.splice(i,1);}}
+        }
+
+        const raycaster=new THREE.Raycaster();raycaster.far=RAY_MAX_DISTANCE;
+        function getGunMuzzleWorld(controller){const ml=new THREE.Vector3(0,0.015,-0.12);return ml.clone().applyMatrix4(controller.matrixWorld);}
+        function getControllerRay(controller){const o=getGunMuzzleWorld(controller);const q=controller.getWorldQuaternion(new THREE.Quaternion());return{origin:o,direction:new THREE.Vector3(0,0,-1).applyQuaternion(q)};}
+        function checkBalloonHit(controller){const{o,d}=getControllerRay(controller);raycaster.set(o,d);const hits=raycaster.intersectObjects(balloons.map(b=>b.userData.bodyMesh).filter(Boolean),false);if(hits.length)for(const b of balloons)if(b.userData.bodyMesh===hits[0].object)return{balloon:b,hits:hits[0].point.clone()};return null;}
+
+        function updateLaserPointer(controller,hitPt=null){const laser=controller.userData.laser,mat=controller.userData.laserMaterial;if(!laser||!mat)return;try{const isRight=controller===rightController;if(hitPt){const{o}=getControllerRay(controller);laser.scale.set(1,o.distanceTo(hitPt),1);laser.position.set(0,0,0);mat.color.set(0x00ff44);mat.opacity=0.85;}else{laser.scale.set(1,RAY_MAX_DISTANCE,1);laser.position.set(0,0,0);mat.color.set(isRight?0xff2222:0x2288ff);mat.opacity=0.45;}laser.visible=true;}catch(e){}}
+
+        function setupController(idx){
+            const controller=renderer.xr.getController(idx),grip=renderer.xr.getControllerGrip(idx);
+            const gunModel=idx===1?createRightGunModel():createLeftGunModel();grip.add(gunModel);
+            const laser=createLaserPointer(idx===1);controller.add(laser);
+            const muzzleFlash=createMuzzleFlash(grip,idx===1?0xff4400:0x2288ff);
+            controller.userData={laser,laserMaterial:laser.material,index:idx,gunModel,muzzleFlash};
+            dolly.add(controller);dolly.add(grip);controllers.push(controller);
+            if(idx===0){leftController=controller;controller.add(createLeftControllerScore());controller.addEventListener('selectstart',e=>{if(e.target===controller&&gameActive)try{shoot(controller)}catch(e){}});}
+            else{rightController=controller;controller.addEventListener('selectstart',e=>{if(e.target===controller&&gameActive)try{shoot(controller)}catch(e){}})}
+        }
+
+        function destroyBalloon(b,hitPoint){const idx=balloons.indexOf(b);if(idx>=0)balloons.splice(idx,1);createDebris(hitPoint||b.position.clone(),b.userData.color,b.userData.isGolden);addScore(b.userData.points,b.userData.isGolden);disposeBalloon(b);playPopSound(b.userData.isGolden);}
+
+        // ════════════════════════════════════
+        //  退出检测
+        // ════════════════════════════════════
+        let prevRightBtn={b4:false,b5:false};
+        function exitVR(){if(renderer.xr.isPresenting)renderer.xr.getSession()?.end()?.catch(()=>{})}
+        function handleExit(){const session=renderer.xr.getSession();if(!session)return;for(const src of session.inputSources){if(src.handedness!=='right'||!src.gamepad||src.gamepad.buttons.length<6)continue;const a=src.gamepad.buttons[4].pressed,b=src.gamepad.buttons[5].pressed;if(a&&!prevRightBtn.b4)exitVR();if(b&&!prevRightBtn.b5)exitVR();prevRightBtn.b4=a;prevRightBtn.b5=b;}}
+
+        function updateInput(){const session=renderer.xr.getSession();if(!session)return;rightInput.stickX=0;rightInput.stickY=0;rightInput.trigger=false;leftInput.stickX=0;leftInput.stickY=0;leftInput.trigger=false;for(const src of session.inputSources){if(!src.gamepad)continue;const gp=src.gamepad,hand=src.handedness;if(gp.axes.length>=4){if(hand==='right'){rightInput.stickX=gp.axes[2]||0;rightInput.stickY=gp.axes[3]||0;rightInput.trigger=(gp.buttons[0]?.value??0)>0.5}else if(hand==='left'){leftInput.stickX=gp.axes[2]||0;leftInput.stickY=gp.axes[3]||0;leftInput.trigger=(gp.buttons[0]?.value??0)>0}else{if(rightInput.stickX===0&&rightInput.stickY===0){rightInput.stickX=gp.axes[2]||0;rightInput.stickY=gp.axes[3]||0;rightInput.trigger=(gp.buttons[0]?.value??0)>0}}}else if(gp.axes.length>=2&&hand==='left'){leftInput.stickX=gp.axes[0];leftInput.stickY=gp.axes[1];}}}
+
+        let rifleTimer=0,pistolCooldown=0;
+        function handleAutoFire(dt){if(!rightController||!rightInput.trigger){rifleTimer=0;return;}rifleTimer+=dt;const cd=RIFLE_COOLDOWN/1000;while(rifleTimer>=cd){shoot(rightController);rifleTimer-=cd;}}
+        function handleLeftFire(dt){if(!leftController||!leftInput.trigger){leftTriggerWas=false;return;}if(pistolCooldown>0)return;if(!leftTriggerWas&&pistolCooldown<=0){shoot(leftController);pistolCooldown=0.25;leftTriggerWas=true;}if(pistolCooldown>0)pistolCooldown-=dt;}
+
+        function handleMove(dt){let sx=rightInput.stickX,sy=rightInput.stickY;if(Math.abs(sx)<DEADZONE&&Math.abs(sy)<DEADZONE){sx=leftInput.stickX;sy=leftInput.stickY;}if(Math.abs(sx)<DEADZONE&&Math.abs(sy)<DEADZONE)return;const f=new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);f.y=0;f.normalize();const r=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);r.y=0;r.normalize();const md=new THREE.Vector3().addScaledVector(f,-sy).addScaledVector(r,sx).normalize();const sp=MOVE_SPEED*Math.max(Math.abs(sx),Math.abs(sy));dolly.position.addScaledVector(md,sp*dt);dolly.position.x=THREE.MathUtils.clamp(dolly.position.x,-25,25);dolly.position.z=THREE.MathUtils.clamp(dolly.position.z,-25,25);}
+
+        // 气球生成与动画
+        let lastSpawn=0;
+        function spawnLoop(now){if(now-lastSpawn>SPAWN_INTERVAL){lastSpawn=now;if(balloons.length<MAX_BALLOONS)spawnBalloon();if(Math.random()<0.25&&balloons.length<MAX_BALLOONS-1)setTimeout(()=>{if(balloons.length<MAX_BALLOONS)spawnBalloon()},300+Math.random()*500);}}
+        function animBalloons(now){balloons.forEach(b=>{const t=now*0.001;b.position.y=b.userData.baseY+Math.sin(t*b.userData.floatSpeed+b.userData.floatPhase)*b.userData.floatAmp;b.position.x+=b.userData.driftX*0.016;b.position.z+=b.userData.driftZ*0.016;b.rotation.y+=0.003;b.rotation.x+=Math.sin(t*0.7+b.userData.floatPhase)*0.005;const dx=b.position.x-b.userData.spawnPos.x,dz=b.position.z-b.userData.spawnPos.z;if(Math.sqrt(dx*dx+dz*dz)>5){b.userData.driftX*=-0.8;b.userData.driftZ*=-0.8;}});}
+
+        // ════════════════════════════════════════════════
+        //  ★★★ 关卡切换：X键 → 热气球升空 → 暴风雨 ★★★
+        // ════════════════════════════════════════════════
+
+        /**
+         * 开始升空序列
+         */
+        function startAscent() {
+            if (isAscending || currentLevel !== 'cloud') return;
+            console.log('[LEVEL] 🚀 开始升空！');
+
+            isAscending = true;
+            ascentTimer = 0;
+            xKeyHintEl.style.display = 'none';
+
+            // 显示过渡提示
+            showOverlay('🎈🚀 正在升空...');
+
+            // 点燃燃烧器火焰
+            burner.userData.flameMat.opacity = 0.9;
+            burner.userData.flameMat.color.setHex(0xFFAA00);
+        }
+
+        /**
+         * 切换到暴风雨关卡
+         */
+        function switchToStormLevel() {
+            currentLevel = 'storm';
+            console.log('[LEVEL] ⛈️ 进入第2关：暴风雨！');
+
+            // 隐藏过渡提示
+            hideOverlay();
+
+            // ===== 天空变暗 =====
+            skyMat.uniforms.uTopColor.value.setHex(0x1a2332);     // 深蓝灰顶
+            skyMat.uniforms.uMidColor.value.setHex(0x37474F);     // 灰蓝中
+            skyMat.uniforms.uBottomColor.value.setHex(0x546E7A);  // 深灰底
+
+            // 雾气变浓变暗
+            scene.fog.color.setHex(0x37474F);
+            scene.fog.density = 0.015;
+
+            // 光照减弱
+            sunLight.intensity = 0.6;
+            sunLight.color.setHex(0x888899);
+            hemiLight.intensity = 0.4;
+            hemiLight.color.setHex(0x334455);
+
+            // 彩虹灯变暗冷色调
+            partyLights.forEach((pl, i) => {
+                pl.light.intensity = 0.5;
+                pl.light.color.setHex([0x334455, 0x445566, 0x556677][i % 3]);
+            });
+
+            // ===== 云层变暗 =====
+            cloudLayerGroup.traverse(child => {
+                if (child.isMesh && child.material) {
+                    child.material.color.lerp(new THREE.Color(0x556677), 0.6);
+                    child.material.opacity *= 0.85;
+                }
+            });
+
+            // ===== 关卡面板更新 =====
+            levelPanelEl.textContent = '⛈️ 第 2 关 — 暴风雨来临！';
+            levelPanelEl.classList.add('visible');
+
+            // 更新X键提示
+            xKeyHintEl.textContent = '⛈️ 暴风雨模式！';
+            xKeyHintEl.classList.add('storm-mode');
+            xKeyHintEl.style.display = 'block';
+
+            // 显示闪电效果
+            triggerLightning();
+
+            // 燃烧器熄灭
+            burner.userData.flameMat.opacity = 0;
+
+            // 显示完成提示
+            setTimeout(() => {
+                showOverlay('⛈️ 暴风雨来了！');
+                setTimeout(hideOverlay, 2500);
+            }, 500);
+        }
+
+        /**
+         * 触发屏幕闪电动画
+         */
+        function triggerLightning() {
+            lightningEl.style.display = 'block';
+            lightningEl.style.animation = 'none';
+            void lightningEl.offsetWidth;  // force reflow
+            lightningEl.style.animation = 'flashScreen 0.3s ease-out';
+            setTimeout(() => {
+                lightningEl.style.display = 'none';
+            }, 400);
+
+            // 暴风雨模式下随机闪电
+            if (currentLevel === 'storm') {
+                const nextLightning = 2000 + Math.random() * 5000;
+                setTimeout(() => {
+                    if (currentLevel === 'storm' && gameActive) {
+                        triggerLightning();
+                    }
+                }, nextLightning);
+            }
+        }
+
+        /**
+         * 更新升空动画
+         */
+        function updateAscent(dt) {
+            if (!isAscending) return;
+
+            ascentTimer += dt;
+
+            // 缓动曲线：慢→快→慢
+            const progress = Math.min(ascentTimer / ASCENT_DURATION, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);  // cubic out
+
+            // 热气球上升
+            const riseHeight = eased * 15;  // 总共上升15米
+            hotAirBalloonGroup.position.y = CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD + riseHeight;
+
+            // dolly（玩家）跟随上升
+            dolly.position.y = PLAYER_SPAWN_Y + riseHeight;
+
+            // 摇摆幅度增大
+            hotAirBalloonGroup.userData.swayAmount = 0.03 + eased * 0.08;
+
+            // 火焰闪烁
+            if (burner.userData.flameMat) {
+                burner.userData.flameMat.opacity = 0.6 + Math.sin(ascentTimer * 20) * 0.3;
+                burner.userData.flame.scale.setScalar(1 + Math.sin(ascentTimer * 15) * 0.2);
+            }
+
+            // 进度显示
+            overlayText.textContent = `🎈 升空中... ${Math.round(progress * 100)}%`;
+
+            // 到达终点
+            if (progress >= 1) {
+                isAscending = false;
+                switchToStormLevel();
+            }
+        }
+
+        // ════════════════════════════════════
+        //  主循环
+        // ════════════════════════════════════
+        const clock = new THREE.Clock();
+        let _animFirst = true;  // 首帧标记
+        function animate(ts, frame){
+            if (_animFirst) { debugLog('🔄 animate() 渲染循环已启动', 'ok'); _animFirst = false; }
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            if (renderer.xr.isPresenting && gameActive) {
+                try {
+                    updateInput();
+                    handleExit();
+                    handleMove(dt);
+                    handleAutoFire(dt);
+                    handleLeftFire(dt);
+                    spawnLoop(ts);
+                    animBalloons(ts);
+                    updateDebris(dt);
+                    updateBullets(dt);
+                    updateRecoils(dt);
+                    controllers.forEach(c => {
+                        const h = checkBalloonHit(c);
+                        updateLaserPointer(c, h ? h.point : null);
+                    });
+                    updateLeftScoreDisplay();
+
+                    // 热气球摇摆动画
+                    hotAirBalloonGroup.userData.swayPhase += dt;
+                    if (!isAscending) {
+                        const swayX = Math.sin(hotAirBalloonGroup.userData.swayPhase * 0.8) * hotAirBalloonGroup.userData.swayAmount;
+                        const swayZ = Math.sin(hotAirBalloonGroup.userData.swayPhase * 0.6 + 1.0) * hotAirBalloonGroup.userData.swayAmount * 0.7;
+                        hotAirBalloonGroup.position.x = swayX;
+                        hotAirBalloonGroup.position.z = swayZ;
+                    }
+
+                    // 升空更新
+                    updateAscent(dt);
+
+                    // 气球条纹动画
+                    if (envelope.userData.bodyMat) {
+                        envelope.userData.bodyMat.uniforms.uTime.value = ts * 0.001;
+                    }
+
+                    vrEntryEl.style.display = 'none';
+                    vrHintsEl.style.display = 'none';
+                    statusMsgEl.style.display = 'none';
+                    levelPanelEl.style.display = gameActive ? 'block' : 'none';
+
+                    // X键提示只在云端关卡显示
+                    xKeyHintEl.style.display = (currentLevel === 'cloud' && !isAscending) ? 'block' : (currentLevel === 'storm' ? 'block' : 'none');
+
+                } catch(loopErr) {
+                    console.error('[GAME LOOP ERROR]', loopErr);
+                }
+            }
+            else if (renderer.xr.isPresenting && !gameActive) {
+                vrEntryEl.style.display = 'none';
+                vrHintsEl.style.display = 'none';
+                animBalloons(ts);
+                partyLights.forEach(pl => {
+                    pl.angle += pl.speed * 0.016;
+                    pl.light.position.set(
+                        Math.cos(pl.angle) * pl.radius,
+                        pl.yOffset,
+                        Math.sin(pl.angle) * pl.radius
+                    );
+                });
+                // 热气球预览摇摆
+                hotAirBalloonGroup.userData.swayPhase += dt;
+                const sw = hotAirBalloonGroup.userData.swayAmount;
+                hotAirBalloonGroup.position.x = Math.sin(hotAirBalloonGroup.userData.swayPhase * 0.8) * sw;
+                hotAirBalloonGroup.position.z = Math.sin(hotAirBalloonGroup.userData.swayPhase * 0.6 + 1) * sw * 0.7;
+            }
+            else {
+                // 2D 预览
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+                animBalloons(ts);
+                partyLights.forEach(pl => {
+                    pl.angle += pl.speed * 0.016;
+                    pl.light.position.set(
+                        Math.cos(pl.angle) * pl.radius,
+                        pl.yOffset,
+                        Math.sin(pl.angle) * pl.radius
+                    );
+                });
+                hotAirBalloonGroup.userData.swayPhase += dt;
+                const sw = hotAirBalloonGroup.userData.swayAmount;
+                hotAirBalloonGroup.position.x = Math.sin(hotAirBalloonGroup.userData.swayPhase * 8) * sw;
+                hotAirBalloonGroup.position.z = Math.cos(hotAirBalloonGroup.userData.swayPhase * 6) * sw * 0.7;
+            }
+
+            renderer.render(scene, camera);
+        }
+        renderer.setAnimationLoop(animate);
+
+        // ════════════════════════════════════════════════
+        //  VR 进入逻辑
+        // ════════════════════════════════════════════════
+        
+        // ── 页面加载时预检XR支持（不在点击时检查，避免user gesture超时）──
+        let xrSupported = false;
+        let xrCheckDone  = false;
+
+        function init(){
+            debugLog('🚀 init() 开始执行...', 'i');
+            
+            // ── 预检WebXR支持（页面加载时，不在点击时检查）──
+            (async () => {
+                try {
+                    if (navigator.xr) {
+                        xrSupported = await navigator.xr.isSessionSupported('immersive-vr');
+                        debugLog('预检完成 immersive-vr=' + xrSupported, xrSupported ? 'ok' : 'e');
+                    } else {
+                        console.warn('[VR] navigator.xr 不存在');
+                        debugLog('⚠️ navigator.xr 不存在', 'w');
+                        xrSupported = false;
+                    }
+                } catch(e) {
+                    console.error('[VR] 预检出错:', e);
+                    debugLog('预检出错: ' + e.message, 'e');
+                    xrSupported = false;
+                } finally {
+                    xrCheckDone = true;
+                    if (!xrSupported) {
+                        enterVRBtn.innerHTML = '❌ 设备不支持VR';
+                        enterVRBtn.disabled = true;
+                        enterVRBtn.style.background = '#666';
+                    } else {
+                        enterVRBtn.innerHTML = '☁️ 进入云上气球大战！';
+                    }
+                }
+            })();
+
+            setupController(0);
+            setupController(1);
+            debugLog('✅ 控制器初始化完成', 'ok');
+            for(let i=0;i<8;i++)setTimeout(()=>spawnBalloon(),i*250);
+            setTimeout(()=>spawnBalloon(true),1500);
+            lastSpawn=performance.now();
+
+            async function enterVRAction(e) {
+                e && e.preventDefault();
+                if (enterVRBtn.disabled) return;
+                debugLog('🖱️ Step 1: 按钮被点击! xrSupported=' + xrSupported, 'ok');
+                enterVRBtn.disabled = true;
+                enterVRBtn.innerHTML = '⏳ 正在进入VR...';
+
+                try {
+                    // ── 不在这里检查isSessionSupported！已经在页面加载时预检了 ──
+                    if (!navigator.xr) throw new Error('此浏览器不支持 WebXR。\n请使用 Pico4/Quest 内置浏览器访问 HTTPS 页面。');
+                    if (!xrSupported) throw new Error('设备不支持沉浸式VR模式。\n请确认已戴上头显且通过 HTTPS 访问。');
+
+                    debugLog('⏳ Step 2: 调用 requestSession...', 'i');
+                    
+                    let sess = null;
+                    try {
+                        sess = await navigator.xr.requestSession('immersive-vr', {
+                            requiredFeatures: ['local-floor'],
+                            optionalFeatures: ['bounded-floor', 'hand-tracking']
+                        });
+                        debugLog('✅ Step 3: requestSession 成功 (requiredFeatures)', 'ok');
+                    } catch(reqErr) {
+                        console.warn('[VR] Step 3: requiredFeatures 失败, 回退到全部optional:', reqErr.message);
+                        debugLog('⚠️ Step 3: requiredFeatures失败 → ' + reqErr.message, 'w');
+                        sess = await navigator.xr.requestSession('immersive-vr', {
+                            optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                        });
+                        debugLog('✅ Step 3: requestSession 成功 (optionalFeatures)', 'ok');
+                    }
+
+                    debugLog('⏳ Step 4: setSession...', 'i');
+                    enterVRBtn.innerHTML = '🎮 初始化场景...';
+                    await renderer.xr.setSession(sess);
+                    debugLog('✅ Step 4: setSession完成! presenting=' + renderer.xr.isPresenting, 'ok');
+
+                    debugLog('🎮 Step 5: 游戏激活! gameActive=true', 'ok');
+                    gameActive = true;
+                    showOverlay('☁️ 欢迎来到云端！');
+                    setTimeout(() => hideOverlay(), 2000);
+
+                } catch(err) {
+                    console.error('[VR] ❌ 进入失败 Step:', err);
+                    const errMsg = err.message || String(err);
+                    debugLog('❌ 进入失败: ' + errMsg, 'e');
+                    resetButton(`❌ 进入失败`);
+                    showStatus(errMsg, 'error');
+                    // 错误信息也显示在按钮上，持续可见
+                    enterVRBtn.innerHTML = '❌ 重试';
+                    enterVRBtn.style.fontSize = '16px';
+                    enterVRBtn.style.lineHeight = '1.4';
+                    // 5秒后恢复原状
+                    setTimeout(() => {
+                        if (!renderer.xr.isPresenting) resetButton('☁️ 进入云上气球大战！');
+                    }, 5000);
+                }
+            }
+
+            enterVRBtn.addEventListener('click', enterVRAction);
+            debugLog('✅ 按钮事件监听已绑定 (等待点击)', 'ok');
+
+            renderer.xr.addEventListener('sessionend', () => {
+                rifleTimer = 0; pistolCooldown = 0;
+                gameActive = false;
+                isAscending = false;
+                currentLevel = 'cloud';
+                ascentTimer = 0;
+                resetButton('☁️ 进入云上气球大战！');
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+                showStatus('', '');
+                hideOverlay();
+                xKeyHintEl.style.display = 'none';
+                xKeyHintEl.classList.remove('storm-mode');
+                levelPanelEl.classList.remove('visible');
+                levelPanelEl.style.display = 'none';
+                controllers.forEach(c => { if(c.userData.laser) c.userData.laser.visible = false; });
+
+                // 重置天空颜色
+                skyMat.uniforms.uTopColor.value.setHex(0x87CEEB);
+                skyMat.uniforms.uMidColor.value.setHex(0xB0E0E6);
+                skyMat.uniforms.uBottomColor.value.setHex(0xFFF8DC);
+                scene.fog.color.setHex(0xddeeff);
+                scene.fog.density = 0.008;
+                sunLight.intensity = 1.8;
+                sunLight.color.setHex(0xfff8e0);
+                hemiLight.intensity = 0.9;
+                hemiLight.color.setHex(0x87CEEB);
+                hotAirBalloonGroup.position.y = CLOUD_SURFACE_Y + BALLOON_HEIGHT_ABOVE_CLOUD;
+                burner.userData.flameMat.opacity = 0;
+            });
+
+            renderer.xr.addEventListener('sessionstart', () => {
+                vrEntryEl.style.display = 'none';
+                vrHintsEl.style.display = 'none';
+                statusMsgEl.style.display = 'none';
+                initAudio();
+                if (!gameActive) gameActive = true;
+                levelPanelEl.classList.add('visible');
+                levelPanelEl.style.display = 'block';
+                xKeyHintEl.style.display = 'block';
+                console.log('[VR] sessionstart — gameActive=', gameActive);
+                debugLog('🔥 sessionstart事件触发! presenting=' + renderer.xr.isPresenting, 'ok');
+            });
+
+            // ── 键盘事件：X键升空 / ESC退出 ──
+            window.addEventListener('keydown', e => {
+                const key = e.key.toLowerCase();
+                if (key === 'escape' && renderer.xr.isPresenting) exitVR();
+
+                // X键：升空进入下一关
+                if ((key === 'x' || key === 'x') && gameActive && !isAscending && currentLevel === 'cloud') {
+                    startAscent();
+                }
+            });
+
+            // VR手柄 X键（button index 2 在某些控制器上是X键）
+            // 也通过 inputSources 的 buttons[2] 检测
+            window.addEventListener('keydown', e => {
+                // 已经在上面处理了
+            });
+
+            // 定期检查手柄X键输入
+            let prevXButton = false;
+            const originalUpdateInput = updateInput;
+            // 重写 updateInput 以包含X键检测
+            updateInput = function() {
+                originalUpdateInput();
+                // 检查左右手柄的额外按钮作为X键
+                const session = renderer.xr.getSession();
+                if (!session) return;
+                for (const src of session.inputSources) {
+                    if (!src.gamepad || src.gamepad.buttons.length < 3) continue;
+                    // button[2] 常见于 X/A/Y/B 布局中的 X 键
+                    const xPressed = src.gamepad.buttons[2]?.pressed;
+                    if (xPressed && !prevXButton && gameActive && !isAscending && currentLevel === 'cloud') {
+                        startAscent();
+                    }
+                    prevXButton = !!xPressed;
+                }
+            };
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function resetButton(html) {
+            enterVRBtn.disabled = false;
+            enterVRBtn.innerHTML = html || '☁️ 进入云上气球大战！';
+            enterVRBtn.style.fontSize = '';
+            enterVRBtn.style.lineHeight = '';
+        }
+        function showStatus(msg, type) {
+            statusMsgEl.innerHTML = msg;
+            statusMsgEl.className = type || '';
+            statusMsgEl.style.display = msg ? 'block' : 'none';
+        }
+        function showOverlay(text) {
+            overlayText.textContent = text;
+            vrOverlay.style.display = 'flex';
+        }
+        function hideOverlay() {
+            vrOverlay.style.display = 'none';
+        }
+
+        init();
+        debugLog('✅ 页面初始化完成，等待用户操作', 'ok');
+    </script>
+</body>
+</html>
