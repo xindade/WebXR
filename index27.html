@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VR射击气球 - 抓取黑块 + 调试日志</title>
+    <style>
+        :root { --bg: #1a1a2e; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg); overflow: hidden;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh; width: 100vw;
+            user-select: none; -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        canvas { display: block; }
+        #hud {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+            display: flex; flex-direction: column; justify-content: flex-start;
+            align-items: center; padding-top: 24px;
+        }
+        #score-panel {
+            background: rgba(0,0,0,0.65); backdrop-filter: blur(12px);
+            border: 2px solid rgba(255,255,255,0.25); border-radius: 24px;
+            padding: 14px 32px; color: #fff; text-align: center;
+            pointer-events: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        #score-panel .label { font-size: 13px; text-transform: uppercase; letter-spacing: 3px; opacity: 0.8; }
+        #score-panel .score {
+            font-size: 52px; font-weight: 700; line-height: 1;
+            background: linear-gradient(135deg, #ffd700, #ffaa00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            background-clip: text; filter: drop-shadow(0 2px 8px rgba(255,170,0,0.5));
+        }
+        #score-panel .combo { font-size: 14px; color: #ffdd57; opacity: 0; transition: opacity 0.2s; min-height: 20px; }
+        #score-panel .combo.active { opacity: 1; animation: pulse 0.4s ease-out; }
+        @keyframes pulse { 0%,100%{ transform: scale(1); } 50%{ transform: scale(1.3); } }
+        
+        /* 调试日志面板 - VR内可见 */
+        #debug-panel {
+            position: fixed; top: 20px; right: 20px;
+            background: rgba(0,0,0,0.75); backdrop-filter: blur(8px);
+            color: #0f0; font-family: monospace; font-size: 14px;
+            padding: 12px 18px; border-radius: 12px;
+            border-left: 4px solid #ffaa00;
+            pointer-events: none; z-index: 100;
+            text-align: left; width: 260px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        #debug-panel h4 { margin: 0 0 6px 0; color: #ffaa00; font-size: 14px; }
+        #debug-panel .log-line { margin: 4px 0; word-break: break-word; }
+        .log-value { color: #ffaa66; font-weight: bold; }
+        
+        #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; pointer-events: auto; }
+        #enter-vr-btn {
+            display: block; padding: 16px 44px; font-size: 20px; font-weight: 700;
+            letter-spacing: 2px; color: #fff;
+            background: linear-gradient(135deg, #e94560, #c23152);
+            border: none; border-radius: 50px; cursor: pointer;
+            transition: all 0.3s ease; box-shadow: 0 8px 30px rgba(233,69,96,0.5);
+            text-transform: uppercase; outline: none;
+        }
+        #enter-vr-btn:hover { background: linear-gradient(135deg, #ff5a7a, #e94560); transform: translateY(-3px); }
+        #enter-vr-btn:active { transform: scale(0.96); }
+        #enter-vr-btn:disabled { background: #555; box-shadow: none; cursor: not-allowed; opacity: 0.6; }
+        #vr-hints {
+            position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+            z-index: 15; pointer-events: none; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+        }
+        .hint-badge {
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+            border-radius: 20px; padding: 8px 18px; color: #fff; font-size: 13px;
+            letter-spacing: 1px; white-space: nowrap;
+        }
+        .hint-badge .key { font-weight: 700; color: #ffd700; }
+        #status-msg {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            z-index: 30; color: #fff; font-size: 18px; text-align: center;
+            background: rgba(0,0,0,0.75); padding: 20px 30px;
+            border-radius: 16px; display: none;
+        }
+        #status-msg.error { background: rgba(180,30,30,0.85); display: block; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <div id="score-panel">
+            <div class="label">🏆 得分</div>
+            <div class="score" id="score-value">0</div>
+            <div class="combo" id="combo-text"></div>
+        </div>
+    </div>
+    <div id="debug-panel">
+        <h4>🔧 调试日志 (侧键状态)</h4>
+        <div class="log-line">🤚 右手侧键: <span id="dbg-right-grip" class="log-value">❌</span></div>
+        <div class="log-line">🤚 左手侧键: <span id="dbg-left-grip" class="log-value">❌</span></div>
+        <div class="log-line">🔫 右手扳机: <span id="dbg-right-trigger" class="log-value">❌</span></div>
+        <div class="log-line">🎯 抓取状态: <span id="dbg-grab-status" class="log-value">无</span></div>
+        <div class="log-line">📦 黑块数量: <span id="dbg-cubes-count" class="log-value">0</span></div>
+    </div>
+    <div id="vr-entry"><button id="enter-vr-btn">🎯 进入VR游戏</button></div>
+    <div id="vr-hints">
+        <span class="hint-badge">🔫 <span class="key">右手扳机</span> 自动步枪</span>
+        <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
+        <span class="hint-badge">✊ <span class="key">侧键(握持键)</span> 抓取黑块</span>
+        <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
+    </div>
+    <div id="status-msg"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // DOM 元素
+        const scoreValueEl = document.getElementById('score-value');
+        const comboTextEl = document.getElementById('combo-text');
+        const enterVRBtn = document.getElementById('enter-vr-btn');
+        const statusMsgEl = document.getElementById('status-msg');
+        const vrHintsEl = document.getElementById('vr-hints');
+        const vrEntryEl = document.getElementById('vr-entry');
+        
+        // 调试面板元素
+        const dbgRightGrip = document.getElementById('dbg-right-grip');
+        const dbgLeftGrip = document.getElementById('dbg-left-grip');
+        const dbgRightTrigger = document.getElementById('dbg-right-trigger');
+        const dbgGrabStatus = document.getElementById('dbg-grab-status');
+        const dbgCubesCount = document.getElementById('dbg-cubes-count');
+
+        // 游戏基础参数
+        let score = 0, comboCount = 0, comboTimer;
+        const COMBO_TIMEOUT = 1500, BALLOON_POINTS = 10, GOLDEN_POINTS = 30;
+        const MAX_BALLOONS = 20, SPAWN_INTERVAL = 1800;
+        const SPAWN_RADIUS_MIN = 4, SPAWN_RADIUS_MAX = 14;
+        const SPAWN_HEIGHT_MIN = 1.2, SPAWN_HEIGHT_MAX = 4.5;
+        const MOVE_SPEED = 3.5, RAY_MAX_DISTANCE = 20, GOLDEN_CHANCE = 0.12;
+        const RIFLE_COOLDOWN = 120; // ms
+        const DEADZONE = 0.2;
+
+        // 摇杆和扳机状态
+        const rightInput = { stickX: 0, stickY: 0, trigger: false, grip: false };
+        const leftInput  = { stickX: 0, stickY: 0, trigger: false, grip: false };
+
+        // Three.js 核心
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a2a3a);
+        scene.fog = new THREE.Fog(0x1a2a3a, 30, 80);
+
+        const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 0);
+        const dolly = new THREE.Group();
+        dolly.add(camera);
+        scene.add(dolly);
+
+        // 光照
+        scene.add(new THREE.AmbientLight(0xffeedd, 1.2));
+        const sunLight = new THREE.DirectionalLight(0xffffff, 3.0);
+        sunLight.position.set(20, 30, 10);
+        sunLight.castShadow = true;
+        scene.add(sunLight);
+        scene.add(new THREE.HemisphereLight(0x8cb8e0, 0x5a8a3c, 0.8));
+
+        // 地面
+        const groundMat = new THREE.MeshStandardMaterial({ color: 0x5a9e3f, roughness: 0.85 });
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        ground.receiveShadow = true;
+        scene.add(ground);
+        const gridHelper = new THREE.PolarGridHelper(35, 40, 28, 128, 0x4a8a30, 0x4a8a30);
+        gridHelper.position.y = 0.02;
+        scene.add(gridHelper);
+
+        // 简易树木
+        function createTree(x, z) {
+            const group = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0x8B6914 }));
+            trunk.position.y = 0.6;
+            group.add(trunk);
+            const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.0, 8), new THREE.MeshStandardMaterial({ color: 0x3d8a28 }));
+            foliage.position.y = 1.2;
+            group.add(foliage);
+            group.position.set(x, 0, z);
+            return group;
+        }
+        for (let i = 0; i < 40; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const radius = 9 + Math.random() * 25;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            if (Math.abs(x) < 4 && Math.abs(z) < 4) continue;
+            scene.add(createTree(x, z));
+        }
+
+        // -------------------- 黑色方块抓取系统 --------------------
+        const CUBE_SIZE = 0.2;
+        const GROUND_Y = CUBE_SIZE/2;  // 0.1
+        const blackCubes = [];
+        const cubePhysics = new Map(); // map cube -> { velocity }
+        
+        class CubePhys {
+            constructor() { this.velocity = new THREE.Vector3(0,0,0); }
+        }
+        
+        function spawnBlackCube(x, z) {
+            const geometry = new THREE.BoxGeometry(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE);
+            const material = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2, metalness: 0.1 });
+            const cube = new THREE.Mesh(geometry, material);
+            cube.castShadow = true;
+            cube.receiveShadow = true;
+            cube.position.set(x, GROUND_Y, z);
+            scene.add(cube);
+            blackCubes.push(cube);
+            cubePhysics.set(cube, new CubePhys());
+            dbgCubesCount.innerText = blackCubes.length;
+            return cube;
+        }
+        
+        function initBlackCubes(count = 12) {
+            for (let i = 0; i < count; i++) {
+                let attempts = 0;
+                while (attempts < 20) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = 6 + Math.random() * 20;
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
+                    if (Math.abs(x) < 2 && Math.abs(z) < 2) continue;
+                    let overlap = false;
+                    for (let cb of blackCubes) {
+                        if (Math.hypot(cb.position.x - x, cb.position.z - z) < 0.6) { overlap = true; break; }
+                    }
+                    if (!overlap) {
+                        spawnBlackCube(x, z);
+                        break;
+                    }
+                    attempts++;
+                }
+                if (attempts >= 20) spawnBlackCube((Math.random() - 0.5) * 28, (Math.random() - 0.5) * 28);
+            }
+        }
+        
+        // 物理更新
+        const GRAVITY = 12.0;
+        function updateBlackCubesPhysics(dt) {
+            for (let cube of blackCubes) {
+                if (grabbedCube === cube) continue;
+                const phys = cubePhysics.get(cube);
+                if (!phys) continue;
+                phys.velocity.y -= GRAVITY * dt;
+                cube.position.x += phys.velocity.x * dt;
+                cube.position.y += phys.velocity.y * dt;
+                cube.position.z += phys.velocity.z * dt;
+                
+                const half = CUBE_SIZE/2;
+                if (cube.position.y - half <= 0) {
+                    cube.position.y = half;
+                    if (phys.velocity.y < 0) phys.velocity.y = -phys.velocity.y * 0.3;
+                    else phys.velocity.y = 0;
+                    phys.velocity.x *= 0.98;
+                    phys.velocity.z *= 0.98;
+                    if (Math.abs(phys.velocity.x) < 0.02 && Math.abs(phys.velocity.z) < 0.02) phys.velocity.x = phys.velocity.z = 0;
+                }
+                const limit = 34;
+                if (cube.position.x > limit) { cube.position.x = limit; phys.velocity.x *= -0.5; }
+                if (cube.position.x < -limit) { cube.position.x = -limit; phys.velocity.x *= -0.5; }
+                if (cube.position.z > limit) { cube.position.z = limit; phys.velocity.z *= -0.5; }
+                if (cube.position.z < -limit) { cube.position.z = -limit; phys.velocity.z *= -0.5; }
+                if (cube.position.y > 8) { cube.position.y = 8; phys.velocity.y *= -0.5; }
+            }
+        }
+        
+        let grabbedCube = null;
+        let grabbingController = null;
+        let grabOffset = new THREE.Vector3();
+        
+        function tryGrab(controller, worldPos, gripPressed) {
+            if (!gripPressed) return false;
+            if (grabbedCube) return false;
+            let closest = null;
+            let minDist = 0.7;  // 抓取距离
+            for (let cube of blackCubes) {
+                const dist = worldPos.distanceTo(cube.position);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = cube;
+                }
+            }
+            if (closest) {
+                grabbedCube = closest;
+                grabbingController = controller;
+                grabOffset.copy(closest.position).sub(worldPos);
+                const phys = cubePhysics.get(closest);
+                if (phys) phys.velocity.set(0,0,0);
+                closest.material.emissive = new THREE.Color(0x444444);
+                closest.material.emissiveIntensity = 0.8;
+                dbgGrabStatus.innerText = `已抓住 (${closest.position.x.toFixed(1)}, ${closest.position.z.toFixed(1)})`;
+                console.log(`[抓取] 成功抓住方块，手柄类型: ${controller === rightController ? '右手' : '左手'}`);
+                return true;
+            }
+            return false;
+        }
+        
+        function releaseCube(handVel = null) {
+            if (!grabbedCube) return;
+            const phys = cubePhysics.get(grabbedCube);
+            if (phys) {
+                if (handVel) {
+                    phys.velocity.copy(handVel);
+                    phys.velocity.y += 2.5;
+                } else {
+                    phys.velocity.set(0, 3.5, 0);
+                }
+            }
+            grabbedCube.material.emissiveIntensity = 0;
+            grabbedCube = null;
+            grabbingController = null;
+            dbgGrabStatus.innerText = "无";
+            console.log(`[释放] 方块已释放`);
+        }
+        
+        function updateGrabbedCube(controllerWorldPos) {
+            if (!grabbedCube || !grabbingController) return;
+            grabbedCube.position.copy(controllerWorldPos.clone().add(grabOffset));
+            const half = CUBE_SIZE/2;
+            if (grabbedCube.position.y - half < 0) grabbedCube.position.y = half;
+        }
+        
+        function resetOutOfBoundsCubes() {
+            const limit = 38;
+            for (let cube of blackCubes) {
+                if (Math.abs(cube.position.x) > limit || Math.abs(cube.position.z) > limit || cube.position.y < -2) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = 10 + Math.random() * 12;
+                    cube.position.x = Math.cos(angle) * radius;
+                    cube.position.z = Math.sin(angle) * radius;
+                    cube.position.y = GROUND_Y;
+                    const phys = cubePhysics.get(cube);
+                    if (phys) phys.velocity.set(0,0,0);
+                }
+            }
+        }
+        
+        // -------------------- 气球系统 --------------------
+        const balloons = [];
+        const balloonGroup = new THREE.Group();
+        scene.add(balloonGroup);
+        const balloonColors = [0xff3b3b, 0xff6b35, 0xffc635, 0x4caf50, 0x2196f3, 0x9c27b0, 0xe91e63, 0x00bcd4, 0xff9800];
+        const goldenColor = 0xffd700;
+        
+        function createBalloonMesh(color) {
+            const g = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.SphereGeometry(0.35, 24, 20), new THREE.MeshStandardMaterial({ color, roughness: 0.25, emissive: color, emissiveIntensity: 0.15 }));
+            body.name = 'balloonBody';
+            g.add(body);
+            g.add(new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.14, 8), new THREE.MeshStandardMaterial({ color: new THREE.Color(color).multiplyScalar(0.6) })).translateY(-0.38));
+            g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.025, 0.22, 6), new THREE.MeshStandardMaterial({ color: 0xcccccc })).translateY(-0.5));
+            const hl = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 }));
+            hl.position.set(0.15, 0.18, 0.15);
+            g.add(hl);
+            g.userData = { bodyMesh: body, bodyMaterial: body.material };
+            return g;
+        }
+        
+        function spawnBalloon(forceGolden = false) {
+            if (balloons.length >= MAX_BALLOONS) {
+                const old = balloons.shift();
+                balloonGroup.remove(old);
+                old.children.forEach(c => { if(c.geometry) c.geometry.dispose(); if(c.material) c.material.dispose(); });
+            }
+            const isGolden = forceGolden || Math.random() < GOLDEN_CHANCE;
+            const color = isGolden ? goldenColor : balloonColors[Math.floor(Math.random() * balloonColors.length)];
+            const b = createBalloonMesh(color);
+            b.userData.isGolden = isGolden;
+            b.userData.color = color;
+            b.userData.baseY = SPAWN_HEIGHT_MIN + Math.random() * (SPAWN_HEIGHT_MAX - SPAWN_HEIGHT_MIN);
+            b.userData.floatSpeed = 0.6 + Math.random() * 1.6;
+            b.userData.floatAmp = 0.15 + Math.random() * 0.6;
+            b.userData.floatPhase = Math.random() * Math.PI * 2;
+            b.userData.driftX = (Math.random() - 0.5) * 0.3;
+            b.userData.driftZ = (Math.random() - 0.5) * 0.3;
+            b.userData.points = isGolden ? GOLDEN_POINTS : BALLOON_POINTS;
+            
+            const pos = dolly.position;
+            const angle = Math.random() * Math.PI * 2;
+            const r = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
+            b.position.set(pos.x + Math.cos(angle) * r, b.userData.baseY, pos.z + Math.sin(angle) * r);
+            b.userData.spawnPos = b.position.clone();
+            if (isGolden) b.scale.setScalar(0.85);
+            balloonGroup.add(b);
+            balloons.push(b);
+        }
+        
+        function disposeBalloon(b) {
+            balloonGroup.remove(b);
+            b.children.forEach(c => { if(c.geometry) c.geometry.dispose(); if(c.material) c.material.dispose(); });
+        }
+        
+        // 碎片特效
+        const debrisList = [];
+        const debrisGroup = new THREE.Group();
+        scene.add(debrisGroup);
+        function createDebris(pos, color, isGolden) {
+            const count = isGolden ? 18 : 10;
+            const baseCol = new THREE.Color(color);
+            for (let i = 0; i < count; i++) {
+                const size = 0.02 + Math.random() * 0.06;
+                const geom = new THREE.BoxGeometry(size, size, size);
+                const mat = new THREE.MeshStandardMaterial({ color: baseCol.clone().multiplyScalar(0.7+Math.random()*0.5), transparent: true });
+                const piece = new THREE.Mesh(geom, mat);
+                piece.position.copy(pos);
+                const dir = new THREE.Vector3((Math.random()-0.5)*2, Math.random()*1.5+0.5, (Math.random()-0.5)*2).normalize();
+                const speed = 1.8 + Math.random() * 4;
+                piece.userData = { vel: dir.multiplyScalar(speed), life: 5, grounded: false, mat: mat };
+                debrisGroup.add(piece);
+                debrisList.push(piece);
+            }
+        }
+        function updateDebris(dt) {
+            for (let i=debrisList.length-1; i>=0; i--) {
+                const d = debrisList[i], ud = d.userData;
+                if (!ud.grounded) {
+                    d.position.x += ud.vel.x * dt;
+                    d.position.y += ud.vel.y * dt;
+                    d.position.z += ud.vel.z * dt;
+                    ud.vel.y -= 9.8 * dt;
+                    if (d.position.y <= 0.05) {
+                        d.position.y = 0.05;
+                        ud.grounded = true;
+                        ud.vel.set(0,0,0);
+                    }
+                } else {
+                    ud.life -= dt;
+                    if (ud.life <= 0.2) {
+                        ud.mat.dispose(); d.geometry.dispose();
+                        debrisGroup.remove(d);
+                        debrisList.splice(i,1);
+                    } else if (ud.life < 0.8) ud.mat.opacity = ud.life / 0.8;
+                }
+            }
+        }
+        
+        // 音频
+        let audioCtx;
+        function initAudio() { if (!audioCtx) try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+        function playPopSound() { if(!audioCtx)return; try{ const now=audioCtx.currentTime; const src=audioCtx.createBufferSource(); const dur=0.12; const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*dur,audioCtx.sampleRate); const data=buf.getChannelData(0); for(let i=0;i<buf.length;i++) data[i]=(Math.random()*2-1)*Math.exp(-i/audioCtx.sampleRate*28); src.buffer=buf; const gain=audioCtx.createGain(); gain.gain.setValueAtTime(0.4,now); gain.gain.exponentialRampToValueAtTime(0.001,now+dur); src.connect(gain); gain.connect(audioCtx.destination); src.start(now); }catch(e){} }
+        function playShoot() { if(!audioCtx)return; try{ const now=audioCtx.currentTime; const src=audioCtx.createBufferSource(); const dur=0.05; const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*dur,audioCtx.sampleRate); const data=buf.getChannelData(0); for(let i=0;i<buf.length;i++) data[i]=(Math.random()*2-1)*Math.exp(-i/audioCtx.sampleRate*55); src.buffer=buf; const gain=audioCtx.createGain(); gain.gain.setValueAtTime(0.2,now); gain.gain.exponentialRampToValueAtTime(0.001,now+dur); src.connect(gain); gain.connect(audioCtx.destination); src.start(now); }catch(e){} }
+        
+        function addScore(pts, isGolden) {
+            score += pts;
+            scoreValueEl.textContent = score;
+            scoreValueEl.style.transform = 'scale(1.2)'; setTimeout(()=>scoreValueEl.style.transform='scale(1)',150);
+            comboCount++;
+            if(comboTimer) clearTimeout(comboTimer);
+            comboTimer = setTimeout(()=>{ comboCount=0; comboTextEl.textContent=''; comboTextEl.classList.remove('active'); }, COMBO_TIMEOUT);
+            if(comboCount>=3){ comboTextEl.textContent=`🔥 ${comboCount}连击!`; comboTextEl.classList.add('active'); setTimeout(()=>comboTextEl.classList.remove('active'),500);}
+            else if(isGolden){ comboTextEl.textContent='⭐ 金色气球!'; comboTextEl.classList.add('active'); setTimeout(()=>comboTextEl.classList.remove('active'),500);}
+        }
+        
+        // -------------------- 手枪及子弹系统 --------------------
+        const bullets = [];
+        const bulletGroup = new THREE.Group();
+        scene.add(bulletGroup);
+        function shootBullet(controller, isRight) {
+            const muzzleLocal = new THREE.Vector3(0, 0.02, -0.12);
+            const origin = muzzleLocal.clone().applyMatrix4(controller.matrixWorld);
+            const quat = controller.getWorldQuaternion(new THREE.Quaternion());
+            const dir = new THREE.Vector3(0,0,-1).applyQuaternion(quat);
+            const geom = isRight ? new THREE.BoxGeometry(0.04,0.04,0.04) : new THREE.SphereGeometry(0.025,6,6);
+            const mat = new THREE.MeshStandardMaterial({ color: isRight ? 0xffaa44 : 0x44aaff, emissive: isRight ? 0xff4400 : 0x0044aa });
+            const bullet = new THREE.Mesh(geom, mat);
+            bullet.position.copy(origin);
+            bullet.userData = { vel: dir.clone().normalize().multiplyScalar(16), life: 1.5 };
+            bulletGroup.add(bullet);
+            bullets.push(bullet);
+            playShoot();
+        }
+        
+        function updateBullets(dt) {
+            for (let i=bullets.length-1; i>=0; i--) {
+                const b = bullets[i];
+                b.position.x += b.userData.vel.x * dt;
+                b.position.y += b.userData.vel.y * dt;
+                b.position.z += b.userData.vel.z * dt;
+                b.userData.life -= dt;
+                let hit = false;
+                for (let j=balloons.length-1; j>=0; j--) {
+                    const bal = balloons[j];
+                    if (b.position.distanceTo(bal.position) < 0.45) {
+                        createDebris(bal.position.clone(), bal.userData.color, bal.userData.isGolden);
+                        addScore(bal.userData.points, bal.userData.isGolden);
+                        disposeBalloon(bal);
+                        balloons.splice(j,1);
+                        playPopSound();
+                        hit = true;
+                        break;
+                    }
+                }
+                if (hit || b.userData.life <= 0 || Math.abs(b.position.y) > 40) {
+                    b.geometry.dispose(); if(b.material) b.material.dispose();
+                    bulletGroup.remove(b);
+                    bullets.splice(i,1);
+                }
+            }
+        }
+        
+        // -------------------- 手柄模型(可视化)及控制 --------------------
+        const controllers = [];
+        let leftController, rightController;
+        
+        function createControllerModel(isRight) {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.06, 0.1), new THREE.MeshStandardMaterial({ color: isRight ? 0xcc4444 : 0x44cc44, roughness: 0.5, metalness: 0.6 }));
+            body.position.set(0, 0, 0);
+            group.add(body);
+            const trigger = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.02, 0.04), new THREE.MeshStandardMaterial({ color: 0x888888 }));
+            trigger.position.set(0, -0.03, 0.04);
+            group.add(trigger);
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.012, 0.09, 6), new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.8 }));
+            barrel.rotation.x = Math.PI/2;
+            barrel.position.set(0, 0.02, -0.07);
+            group.add(barrel);
+            const laserGeo = new THREE.CylinderGeometry(0.002, 0.002, 1, 4);
+            laserGeo.rotateX(Math.PI/2);
+            const laserMat = new THREE.MeshBasicMaterial({ color: isRight ? 0xff3333 : 0x33aaff, transparent: true, opacity: 0.6 });
+            const laser = new THREE.Mesh(laserGeo, laserMat);
+            laser.position.set(0, 0.015, -0.1);
+            laser.scale.set(1, 8, 1);
+            group.add(laser);
+            group.userData.laser = laser;
+            return group;
+        }
+        
+        function setupController(idx) {
+            const controller = renderer.xr.getController(idx);
+            const grip = renderer.xr.getControllerGrip(idx);
+            const model = createControllerModel(idx === 1);
+            grip.add(model);
+            dolly.add(controller);
+            dolly.add(grip);
+            controllers.push(controller);
+            if (idx === 0) leftController = controller;
+            else rightController = controller;
+            controller.userData.model = model;
+        }
+        
+        function updateLasers() {
+            for (let c of controllers) {
+                if (!c || !c.userData.model) continue;
+                const isRight = (c === rightController);
+                const laser = c.userData.model.userData.laser;
+                if (!laser) continue;
+                const muzzle = new THREE.Vector3(0, 0.02, -0.12).applyMatrix4(c.matrixWorld);
+                const quat = c.getWorldQuaternion(new THREE.Quaternion());
+                const dir = new THREE.Vector3(0,0,-1).applyQuaternion(quat);
+                const raycaster = new THREE.Raycaster(muzzle, dir, 0, 20);
+                const intersects = raycaster.intersectObjects(balloons.map(b=>b), true);
+                let hitDist = 20;
+                if (intersects.length) hitDist = intersects[0].distance;
+                laser.scale.set(1, hitDist, 1);
+                laser.position.set(0, 0.015, -0.1);
+                laser.material.color.set(isRight ? 0xff5555 : 0x55aaff);
+            }
+        }
+        
+        // -------------------- 输入轮询 (侧键使用 button[1]) --------------------
+        function updateInputs() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            rightInput.stickX = 0; rightInput.stickY = 0; rightInput.trigger = false; rightInput.grip = false;
+            leftInput.stickX = 0; leftInput.stickY = 0; leftInput.trigger = false; leftInput.grip = false;
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                const hand = source.handedness;
+                let sx = 0, sy = 0;
+                if (gp.axes.length >= 4) { sx = gp.axes[2]; sy = gp.axes[3]; }
+                else if (gp.axes.length >= 2) { sx = gp.axes[0]; sy = gp.axes[1]; }
+                const trigger = gp.buttons[0]?.value > 0.5;
+                // 关键修正: 侧键通常是 button[1] (握持键)
+                let grip = gp.buttons[1]?.pressed || false;
+                // 兼容其他按钮 (某些设备用 button[2])
+                if (!grip && gp.buttons[2]?.pressed) grip = true;
+                if (hand === 'right') {
+                    rightInput.stickX = sx; rightInput.stickY = sy;
+                    rightInput.trigger = trigger;
+                    rightInput.grip = grip;
+                    // 更新调试面板
+                    dbgRightGrip.innerText = grip ? '✅ 按下' : '❌';
+                    dbgRightTrigger.innerText = trigger ? '🔫 按下' : '❌';
+                } else if (hand === 'left') {
+                    leftInput.stickX = sx; leftInput.stickY = sy;
+                    leftInput.trigger = trigger;
+                    leftInput.grip = grip;
+                    dbgLeftGrip.innerText = grip ? '✅ 按下' : '❌';
+                }
+            }
+        }
+        
+        function handleMovement(dt) {
+            let sx = rightInput.stickX, sy = rightInput.stickY;
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) { sx = leftInput.stickX; sy = leftInput.stickY; }
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) return;
+            const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            forward.y = 0; forward.normalize();
+            const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+            right.y = 0; right.normalize();
+            const moveDir = new THREE.Vector3().addScaledVector(forward, -sy).addScaledVector(right, sx).normalize();
+            const speed = MOVE_SPEED * Math.max(Math.abs(sx), Math.abs(sy));
+            dolly.position.addScaledVector(moveDir, speed * dt);
+            dolly.position.x = Math.min(30, Math.max(-30, dolly.position.x));
+            dolly.position.z = Math.min(30, Math.max(-30, dolly.position.z));
+        }
+        
+        let rifleAccum = 0;
+        let leftCooldown = 0;
+        function handleShooting(dt) {
+            if (rightController && rightInput.trigger) {
+                rifleAccum += dt;
+                const interval = RIFLE_COOLDOWN / 1000;
+                while (rifleAccum >= interval) {
+                    shootBullet(rightController, true);
+                    rifleAccum -= interval;
+                }
+            } else rifleAccum = 0;
+            if (leftController && leftInput.trigger && leftCooldown <= 0) {
+                shootBullet(leftController, false);
+                leftCooldown = 0.25;
+            }
+            if (leftCooldown > 0) leftCooldown -= dt;
+        }
+        
+        function updateGrabSystem(dt) {
+            if (!renderer.xr.isPresenting) return;
+            if (!rightController || !leftController) return;
+            const rightWorldPos = new THREE.Vector3().setFromMatrixPosition(rightController.matrixWorld);
+            const leftWorldPos = new THREE.Vector3().setFromMatrixPosition(leftController.matrixWorld);
+            
+            if (!grabbedCube) {
+                if (rightInput.grip) tryGrab(rightController, rightWorldPos, true);
+                if (!grabbedCube && leftInput.grip) tryGrab(leftController, leftWorldPos, true);
+            } else {
+                const isRightGrab = (grabbingController === rightController);
+                const stillGrip = isRightGrab ? rightInput.grip : leftInput.grip;
+                if (!stillGrip) {
+                    releaseCube(new THREE.Vector3(0, 2.5, 0));
+                } else {
+                    const curPos = isRightGrab ? rightWorldPos : leftWorldPos;
+                    updateGrabbedCube(curPos);
+                }
+            }
+        }
+        
+        let lastSpawnTime = 0;
+        function animateBalloons(now) {
+            const t = now * 0.001;
+            balloons.forEach(b => {
+                b.position.y = b.userData.baseY + Math.sin(t * b.userData.floatSpeed + b.userData.floatPhase) * b.userData.floatAmp;
+                b.position.x += b.userData.driftX * 0.016;
+                b.position.z += b.userData.driftZ * 0.016;
+                b.rotation.y += 0.005;
+                const dx = b.position.x - b.userData.spawnPos.x;
+                const dz = b.position.z - b.userData.spawnPos.z;
+                if (Math.hypot(dx,dz) > 5) { b.userData.driftX *= -0.9; b.userData.driftZ *= -0.9; }
+            });
+            if (now - lastSpawnTime > SPAWN_INTERVAL && balloons.length < MAX_BALLOONS) {
+                lastSpawnTime = now;
+                spawnBalloon();
+                if (Math.random() < 0.3) setTimeout(() => spawnBalloon(), 400);
+            }
+        }
+        
+        function handleExit() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            for (const src of session.inputSources) {
+                if (src.gamepad && src.handedness === 'right') {
+                    const btnA = src.gamepad.buttons[4]?.pressed;
+                    const btnB = src.gamepad.buttons[5]?.pressed;
+                    if (btnA || btnB) { session.end(); break; }
+                }
+            }
+        }
+        
+        const clock = new THREE.Clock();
+        function animate(time) {
+            const dt = Math.min(clock.getDelta(), 0.1);
+            if (renderer.xr.isPresenting) {
+                updateInputs();
+                handleMovement(dt);
+                handleShooting(dt);
+                updateBullets(dt);
+                updateBlackCubesPhysics(dt);
+                updateGrabSystem(dt);
+                resetOutOfBoundsCubes();
+                animateBalloons(time);
+                updateDebris(dt);
+                updateLasers();
+                handleExit();
+                vrEntryEl.style.display = 'none';
+                vrHintsEl.style.display = 'none';
+            } else {
+                animateBalloons(time);
+                updateDebris(dt);
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+            }
+            renderer.render(scene, camera);
+        }
+        renderer.setAnimationLoop(animate);
+        
+        async function initGame() {
+            setupController(0);
+            setupController(1);
+            initBlackCubes(10);
+            for (let i=0;i<6;i++) setTimeout(()=>spawnBalloon(), i*300);
+            lastSpawnTime = performance.now();
+            
+            enterVRBtn.onclick = async () => {
+                enterVRBtn.disabled = true;
+                enterVRBtn.textContent = '⏳ 启动中...';
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                    if (!supported) throw new Error('设备不支持VR');
+                    const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
+                    renderer.xr.setSession(session);
+                    initAudio();
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎯 进入VR游戏';
+                } catch (err) {
+                    statusMsgEl.innerHTML = '❌ ' + err.message;
+                    statusMsgEl.classList.add('error');
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎯 进入VR游戏';
+                }
+            };
+            renderer.xr.addEventListener('sessionend', () => {
+                enterVRBtn.disabled = false;
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+                statusMsgEl.style.display = 'none';
+                dbgGrabStatus.innerText = "无";
+                grabbedCube = null;
+            });
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+        initGame();
+    </script>
+</body>
+</html>
