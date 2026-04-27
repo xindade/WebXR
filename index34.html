@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VR 热气球托盘场景</title>
+    <style>
+        :root { --bg: #1a1a2e; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: var(--bg); overflow: hidden;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            height: 100vh; width: 100vw;
+            user-select: none; -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        canvas { display: block; }
+        
+        #vr-entry { position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%); z-index: 20; }
+        #enter-vr-btn {
+            display: block; padding: 16px 44px; font-size: 20px; font-weight: 700;
+            letter-spacing: 2px; color: #fff;
+            background: linear-gradient(135deg, #e94560, #c23152);
+            border: none; border-radius: 50px; cursor: pointer;
+            transition: all 0.3s ease; box-shadow: 0 8px 30px rgba(233,69,96,0.5);
+            text-transform: uppercase; outline: none;
+        }
+        #enter-vr-btn:hover { background: linear-gradient(135deg, #ff5a7a, #e94560); transform: translateY(-3px); }
+        #enter-vr-btn:active { transform: scale(0.96); }
+        #enter-vr-btn:disabled { background: #555; box-shadow: none; cursor: not-allowed; opacity: 0.6; }
+        
+        #vr-hints {
+            position: fixed; bottom: 130px; left: 50%; transform: translateX(-50%);
+            z-index: 15; pointer-events: none; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
+        }
+        .hint-badge {
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+            border-radius: 20px; padding: 8px 18px; color: #fff; font-size: 13px;
+            letter-spacing: 1px; white-space: nowrap;
+        }
+        .hint-badge .key { font-weight: 700; color: #ffd700; }
+        
+        #status-msg {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            z-index: 30; color: #fff; font-size: 18px; text-align: center;
+            background: rgba(0,0,0,0.75); padding: 20px 30px;
+            border-radius: 16px; display: none;
+        }
+        #status-msg.error { background: rgba(180,30,30,0.85); display: block; }
+        
+        #loading {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: #fff; font-size: 20px; z-index: 100;
+            display: flex; flex-direction: column; align-items: center; gap: 12px;
+        }
+        #loading-spinner {
+            width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: #fff; border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div id="loading-spinner"></div>
+        <div>加载中...</div>
+    </div>
+    <div id="vr-entry"><button id="enter-vr-btn">🎈 进入VR场景</button></div>
+    <div id="vr-hints">
+        <span class="hint-badge">🕹️ <span class="key">摇杆</span> 移动</span>
+        <span class="hint-badge">🅰️ <span class="key">A键</span> 退出</span>
+    </div>
+    <div id="status-msg"></div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // DOM 元素
+        const enterVRBtn = document.getElementById('enter-vr-btn');
+        const statusMsgEl = document.getElementById('status-msg');
+        const vrHintsEl = document.getElementById('vr-hints');
+        const vrEntryEl = document.getElementById('vr-entry');
+        const loadingEl = document.getElementById('loading');
+
+        // 摇杆和输入状态
+        const rightInput = { stickX: 0, stickY: 0 };
+        const leftInput = { stickX: 0, stickY: 0 };
+
+        const MOVE_SPEED = 3.5;
+        const DEADZONE = 0.2;
+
+        // Three.js 核心
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 30, 100);
+
+        const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 200);
+        camera.position.set(0, 1.6, 0);
+        const dolly = new THREE.Group();
+        dolly.add(camera);
+        scene.add(dolly);
+
+        // 光照
+        scene.add(new THREE.AmbientLight(0xffeedd, 1.2));
+        const sunLight = new THREE.DirectionalLight(0xffffff, 2.5);
+        sunLight.position.set(20, 40, 10);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 100;
+        sunLight.shadow.camera.left = -30;
+        sunLight.shadow.camera.right = 30;
+        sunLight.shadow.camera.top = 30;
+        sunLight.shadow.camera.bottom = -30;
+        scene.add(sunLight);
+        scene.add(new THREE.HemisphereLight(0x87CEEB, 0x90EE90, 0.8));
+
+        // -------------------- 卡通热气球托盘地面 --------------------
+        const textureLoader = new THREE.TextureLoader();
+        const groundTexture = textureLoader.load(
+            'image/卡通热气球托盘生成 (3).png',
+            (texture) => {
+                // 加载成功
+                texture.colorSpace = THREE.SRGBColorSpace;
+                texture.wrapS = THREE.RepeatWrapping;
+                texture.wrapT = THREE.RepeatWrapping;
+                // 可根据需要重复贴图
+                // texture.repeat.set(2, 2);
+                loadingEl.style.display = 'none';
+                console.log('地面纹理加载成功');
+            },
+            undefined,
+            (error) => {
+                // 加载失败，使用纯色地面
+                console.error('地面纹理加载失败:', error);
+                loadingEl.innerHTML = '<div style="color:#ff6666;">地面纹理加载失败</div>';
+                setTimeout(() => loadingEl.style.display = 'none', 2000);
+            }
+        );
+
+        const groundMat = new THREE.MeshStandardMaterial({
+            map: groundTexture,
+            roughness: 0.8,
+            metalness: 0.1,
+            // 如果纹理未加载，使用备用颜色
+            color: 0xD2B48C
+        });
+
+        // 创建地面平面 (20x20米，大小可根据图片比例调整)
+        const groundGeometry = new THREE.PlaneGeometry(20, 20);
+        const ground = new THREE.Mesh(groundGeometry, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // 添加简单的云朵装饰
+        function createCloud(x, y, z, scale = 1) {
+            const cloudGroup = new THREE.Group();
+            const cloudMat = new THREE.MeshStandardMaterial({ 
+                color: 0xffffff, 
+                roughness: 1,
+                metalness: 0
+            });
+            
+            // 多个球体组合成云朵
+            const spheres = [
+                { pos: [0, 0, 0], r: 0.8 },
+                { pos: [0.6, 0.2, 0], r: 0.6 },
+                { pos: [-0.6, 0.1, 0], r: 0.55 },
+                { pos: [0.3, 0.4, 0], r: 0.5 },
+                { pos: [-0.3, 0.35, 0], r: 0.45 },
+            ];
+            
+            spheres.forEach(s => {
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(s.r, 16, 12),
+                    cloudMat
+                );
+                sphere.position.set(...s.pos);
+                cloudGroup.add(sphere);
+            });
+            
+            cloudGroup.position.set(x, y, z);
+            cloudGroup.scale.setScalar(scale);
+            return cloudGroup;
+        }
+
+        // 添加几个云朵
+        const clouds = [
+            createCloud(-8, 5, -10, 1.5),
+            createCloud(10, 6, -15, 2),
+            createCloud(-5, 7, 8, 1.2),
+            createCloud(15, 5, 5, 1.8),
+        ];
+        clouds.forEach(cloud => scene.add(cloud));
+
+        // -------------------- 手柄模型 --------------------
+        const controllers = [];
+        let leftController, rightController;
+
+        function createControllerModel(isRight) {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(0.045, 0.06, 0.1),
+                new THREE.MeshStandardMaterial({ 
+                    color: isRight ? 0xcc4444 : 0x44cc44, 
+                    roughness: 0.5, 
+                    metalness: 0.6 
+                })
+            );
+            body.position.set(0, 0, 0);
+            group.add(body);
+            
+            const trigger = new THREE.Mesh(
+                new THREE.BoxGeometry(0.025, 0.02, 0.04),
+                new THREE.MeshStandardMaterial({ color: 0x888888 })
+            );
+            trigger.position.set(0, -0.03, 0.04);
+            group.add(trigger);
+            
+            return group;
+        }
+
+        function setupController(idx) {
+            const controller = renderer.xr.getController(idx);
+            const grip = renderer.xr.getControllerGrip(idx);
+            const model = createControllerModel(idx === 1);
+            grip.add(model);
+            dolly.add(controller);
+            dolly.add(grip);
+            controllers.push(controller);
+            if (idx === 0) leftController = controller;
+            else rightController = controller;
+        }
+
+        // -------------------- 输入处理 --------------------
+        function updateInputs() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            rightInput.stickX = 0; rightInput.stickY = 0;
+            leftInput.stickX = 0; leftInput.stickY = 0;
+            for (const source of session.inputSources) {
+                if (!source.gamepad) continue;
+                const gp = source.gamepad;
+                const hand = source.handedness;
+                let sx = 0, sy = 0;
+                if (gp.axes.length >= 4) { sx = gp.axes[2]; sy = gp.axes[3]; }
+                else if (gp.axes.length >= 2) { sx = gp.axes[0]; sy = gp.axes[1]; }
+                if (hand === 'right') {
+                    rightInput.stickX = sx; rightInput.stickY = sy;
+                } else if (hand === 'left') {
+                    leftInput.stickX = sx; leftInput.stickY = sy;
+                }
+            }
+        }
+
+        function handleMovement(dt) {
+            let sx = rightInput.stickX, sy = rightInput.stickY;
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) {
+                sx = leftInput.stickX; sy = leftInput.stickY;
+            }
+            if (Math.abs(sx) < DEADZONE && Math.abs(sy) < DEADZONE) return;
+            
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+            forward.y = 0; forward.normalize();
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            right.y = 0; right.normalize();
+            
+            const moveDir = new THREE.Vector3()
+                .addScaledVector(forward, -sy)
+                .addScaledVector(right, sx)
+                .normalize();
+            const speed = MOVE_SPEED * Math.max(Math.abs(sx), Math.abs(sy));
+            dolly.position.addScaledVector(moveDir, speed * dt);
+            
+            // 限制移动范围 (保持在地面范围内)
+            dolly.position.x = Math.min(8, Math.max(-8, dolly.position.x));
+            dolly.position.z = Math.min(8, Math.max(-8, dolly.position.z));
+        }
+
+        function handleExit() {
+            const session = renderer.xr.getSession();
+            if (!session) return;
+            for (const src of session.inputSources) {
+                if (src.gamepad && src.handedness === 'right') {
+                    const btnA = src.gamepad.buttons[4]?.pressed;
+                    const btnB = src.gamepad.buttons[5]?.pressed;
+                    if (btnA || btnB) { session.end(); break; }
+                }
+            }
+        }
+
+        // -------------------- 动画循环 --------------------
+        const clock = new THREE.Clock();
+        function animate() {
+            const dt = Math.min(clock.getDelta(), 0.1);
+            
+            if (renderer.xr.isPresenting) {
+                updateInputs();
+                handleMovement(dt);
+                handleExit();
+                vrEntryEl.style.display = 'none';
+                vrHintsEl.style.display = 'none';
+            } else {
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+            }
+            
+            renderer.render(scene, camera);
+        }
+        renderer.setAnimationLoop(animate);
+
+        // -------------------- 初始化 --------------------
+        async function initScene() {
+            setupController(0);
+            setupController(1);
+
+            enterVRBtn.onclick = async () => {
+                enterVRBtn.disabled = true;
+                enterVRBtn.textContent = '⏳ 启动中...';
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                    if (!supported) throw new Error('设备不支持VR');
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        requiredFeatures: ['local-floor']
+                    });
+                    renderer.xr.setSession(session);
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎈 进入VR场景';
+                } catch (err) {
+                    statusMsgEl.innerHTML = '❌ ' + err.message;
+                    statusMsgEl.classList.add('error');
+                    enterVRBtn.disabled = false;
+                    enterVRBtn.textContent = '🎈 进入VR场景';
+                }
+            };
+
+            renderer.xr.addEventListener('sessionend', () => {
+                enterVRBtn.disabled = false;
+                vrEntryEl.style.display = 'block';
+                vrHintsEl.style.display = 'flex';
+                statusMsgEl.style.display = 'none';
+            });
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        initScene();
+    </script>
+</body>
+</html>
