@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico4 WebXR 云层拾星</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        #vr-button {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 18px 40px;
+            font-size: 20px;
+            background: #2d7d46;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 10;
+            transition: background 0.2s;
+        }
+        #vr-button:hover:not(:disabled) {
+            background: #236b39;
+        }
+        #vr-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            z-index: 10;
+            background: rgba(0,0,0,0.6);
+            padding: 14px;
+            border-radius: 10px;
+            max-width: 340px;
+            line-height: 1.6;
+        }
+        #diagnostic {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #ff9999;
+            font-size: 13px;
+            z-index: 10;
+            background: rgba(0,0,0,0.7);
+            padding: 12px;
+            border-radius: 10px;
+            max-width: 380px;
+            line-height: 1.6;
+            display: none;
+        }
+        #diagnostic.show {
+            display: block;
+        }
+        #preview-hint {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #aaaaaa;
+            font-size: 13px;
+            z-index: 10;
+            text-align: center;
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="info">
+        <strong style="font-size:16px">Pico4 WebXR 云层拾星</strong><br>
+        1. 点击"进入VR"按钮<br>
+        2. 站在巨大的云层上<br>
+        3. 用右手柄靠近星星<br>
+        4. 按侧键(grip)抓住星星<br>
+        5. 松开侧键星星落下<br>
+        <span style="color:#ffcc66">鼠标拖拽旋转视角，WASD移动</span>
+    </div>
+    <div id="diagnostic"></div>
+    <div id="preview-hint"></div>
+    <button id="vr-button">检测 WebXR 中...</button>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+        // ========== 诊断信息 ==========
+        const diagnosticEl = document.getElementById('diagnostic');
+        const vrButton = document.getElementById('vr-button');
+        const infoEl = document.getElementById('info');
+        const previewHint = document.getElementById('preview-hint');
+
+        function showDiagnostic(html) {
+            diagnosticEl.innerHTML = html;
+            diagnosticEl.classList.add('show');
+        }
+
+        function logDiag(msg) {
+            console.log('[WebXR诊断]', msg);
+        }
+
+        // ========== 场景初始化 ==========
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050714);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 500);
+        camera.position.set(0, 2, 8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // ========== 灯光 ==========
+        const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
+        scene.add(ambientLight);
+
+        const moonLight = new THREE.DirectionalLight(0xaaccff, 0.6);
+        moonLight.position.set(50, 100, 50);
+        scene.add(moonLight);
+
+        // ========== 星空背景 ==========
+        function createStarField() {
+            const geometry = new THREE.BufferGeometry();
+            const count = 1500;
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            for (let i = 0; i < count; i++) {
+                const r = 200 + Math.random() * 200;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.cos(phi);
+                positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+                const t = Math.random();
+                colors[i * 3] = 0.8 + t * 0.2;
+                colors[i * 3 + 1] = 0.8 + t * 0.2;
+                colors[i * 3 + 2] = 1.0;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.8,
+                sizeAttenuation: false
+            });
+
+            const stars = new THREE.Points(geometry, material);
+            scene.add(stars);
+            return stars;
+        }
+
+        const starField = createStarField();
+
+        // ========== 巨大的云层 ==========
+        const cloudGroup = new THREE.Group();
+        scene.add(cloudGroup);
+
+        const cloudY = -2;
+
+        function createCloudMaterial(opacity = 0.7) {
+            return new THREE.MeshLambertMaterial({
+                color: 0xe0e8ff,
+                transparent: true,
+                opacity: opacity,
+                side: THREE.FrontSide,
+                depthWrite: false
+            });
+        }
+
+        function createCloudCluster(x, z, scale, cloudMaterial) {
+            const cluster = new THREE.Group();
+            const blobs = 3 + Math.floor(Math.random() * 4);
+
+            for (let i = 0; i < blobs; i++) {
+                const r = 3 + Math.random() * 6;
+                const geo = new THREE.SphereGeometry(r, 8, 6);
+                const mesh = new THREE.Mesh(geo, cloudMaterial);
+                mesh.position.set(
+                    (Math.random() - 0.5) * r * 1.5,
+                    (Math.random() - 0.5) * r * 0.5,
+                    (Math.random() - 0.5) * r * 1.5
+                );
+                mesh.scale.set(1, 0.4 + Math.random() * 0.3, 1);
+                cluster.add(mesh);
+            }
+
+            cluster.position.set(x, cloudY, z);
+            cluster.scale.setScalar(scale);
+            return cluster;
+        }
+
+        // 云层地面
+        const groundGeometry = new THREE.PlaneGeometry(200, 200);
+        const groundMaterial = new THREE.MeshLambertMaterial({
+            color: 0x8899bb,
+            transparent: true,
+            opacity: 0.3
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = cloudY;
+        cloudGroup.add(ground);
+
+        // 生成大面积云层
+        const cloudMaterial1 = createCloudMaterial(0.65);
+        const cloudMaterial2 = createCloudMaterial(0.5);
+        const cloudMaterial3 = createCloudMaterial(0.4);
+
+        for (let i = 0; i < 40; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 10 + Math.random() * 80;
+            const x = Math.cos(angle) * dist;
+            const z = Math.sin(angle) * dist;
+            const scale = 0.5 + Math.random() * 1.5;
+
+            const mat = Math.random() > 0.6 ? cloudMaterial1 : (Math.random() > 0.5 ? cloudMaterial2 : cloudMaterial3);
+            const cluster = createCloudCluster(x, z, scale, mat);
+            cloudGroup.add(cluster);
+        }
+
+        // 中心平台
+        const platformGeo = new THREE.CylinderGeometry(15, 18, 2, 16);
+        const platformMat = new THREE.MeshLambertMaterial({
+            color: 0xc0d0f0,
+            transparent: true,
+            opacity: 0.8
+        });
+        const platform = new THREE.Mesh(platformGeo, platformMat);
+        platform.position.y = cloudY - 0.5;
+        cloudGroup.add(platform);
+
+        // 平台顶部装饰云
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const r = 8 + Math.random() * 5;
+            const cluster = createCloudCluster(
+                Math.cos(angle) * r,
+                Math.sin(angle) * r,
+                0.8 + Math.random() * 0.5,
+                cloudMaterial1
+            );
+            cluster.position.y = cloudY + 0.5;
+            cloudGroup.add(cluster);
+        }
+
+        // ========== 可拾取的星星 ==========
+        const stars = [];
+        const STAR_COUNT = 20;
+        const GRAVITY = 9.8;
+
+        // 共享材质和几何体，减少 draw call
+        const starGeometry = new THREE.IcosahedronGeometry(0.15, 0);
+        const starMaterial = new THREE.MeshLambertMaterial({
+            color: 0xffdd44,
+            emissive: 0xffaa00,
+            emissiveIntensity: 0.6
+        });
+
+        const glowGeometry = new THREE.SphereGeometry(0.25, 8, 8);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffdd44,
+            transparent: true,
+            opacity: 0.25,
+            depthWrite: false
+        });
+
+        class Star {
+            constructor(position) {
+                this.isGrabbed = false;
+                this.grabbedBy = null;
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.onGround = false;
+                this.baseY = position.y;
+                this.floatOffset = Math.random() * Math.PI * 2;
+
+                this.mesh = new THREE.Mesh(starGeometry, starMaterial);
+                this.mesh.position.copy(position);
+
+                this.glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                this.mesh.add(this.glow);
+
+                this.rotSpeed = {
+                    x: (Math.random() - 0.5) * 2,
+                    y: (Math.random() - 0.5) * 2,
+                    z: (Math.random() - 0.5) * 2
+                };
+
+                scene.add(this.mesh);
+            }
+
+            update(dt, time) {
+                if (this.isGrabbed && this.grabbedBy) {
+                    this.mesh.position.copy(this.grabbedBy.position);
+                    this.mesh.quaternion.copy(this.grabbedBy.quaternion);
+                    this.velocity.set(0, 0, 0);
+                    this.onGround = false;
+                } else {
+                    if (!this.onGround && this.mesh.position.y > cloudY + 0.2) {
+                        this.velocity.y -= GRAVITY * dt;
+                        this.mesh.position.addScaledVector(this.velocity, dt);
+                    }
+
+                    if (this.mesh.position.y <= cloudY + 0.2) {
+                        this.mesh.position.y = cloudY + 0.2;
+                        this.velocity.set(0, 0, 0);
+                        this.onGround = true;
+                    }
+
+                    this.mesh.rotation.x += this.rotSpeed.x * dt;
+                    this.mesh.rotation.y += this.rotSpeed.y * dt;
+                    this.mesh.rotation.z += this.rotSpeed.z * dt;
+                }
+
+                const scale = 1 + Math.sin(time * 2 + this.floatOffset) * 0.2;
+                this.glow.scale.setScalar(scale);
+            }
+
+            grab(controller) {
+                this.isGrabbed = true;
+                this.grabbedBy = controller;
+                this.velocity.set(0, 0, 0);
+            }
+
+            release() {
+                this.isGrabbed = false;
+                this.grabbedBy = null;
+            }
+
+            getPosition() {
+                return this.mesh.position;
+            }
+        }
+
+        function spawnStars() {
+            for (let i = 0; i < STAR_COUNT; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 2 + Math.random() * 25;
+                const x = Math.cos(angle) * dist;
+                const z = Math.sin(angle) * dist;
+                const y = cloudY + 0.2 + Math.random() * 0.5;
+                stars.push(new Star(new THREE.Vector3(x, y, z)));
+            }
+        }
+
+        spawnStars();
+
+        // ========== WebXR 控制器 ==========
+        const controllerModelFactory = new XRControllerModelFactory();
+
+        const rightController = renderer.xr.getController(1);
+        const rightGrip = renderer.xr.getControllerGrip(1);
+        scene.add(rightController);
+        scene.add(rightGrip);
+
+        const gripModel = controllerModelFactory.createControllerModel(rightGrip);
+        rightGrip.add(gripModel);
+
+        const rightLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -0.3)
+        ]);
+        const rightLineMat = new THREE.LineBasicMaterial({ color: 0x44ff88 });
+        const rightLine = new THREE.Line(rightLineGeo, rightLineMat);
+        rightController.add(rightLine);
+
+        const grabSphereGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const grabSphereMat = new THREE.MeshBasicMaterial({
+            color: 0x44ff88,
+            transparent: true,
+            opacity: 0.3,
+            wireframe: true
+        });
+        const grabSphere = new THREE.Mesh(grabSphereGeo, grabSphereMat);
+        grabSphere.position.set(0, 0, -0.05);
+        rightController.add(grabSphere);
+
+        const leftController = renderer.xr.getController(0);
+        const leftGrip = renderer.xr.getControllerGrip(0);
+        scene.add(leftController);
+        scene.add(leftGrip);
+
+        const leftGripModel = controllerModelFactory.createControllerModel(leftGrip);
+        leftGrip.add(leftGripModel);
+
+        const leftLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -0.3)
+        ]);
+        const leftLineMat = new THREE.LineBasicMaterial({ color: 0x4488ff });
+        const leftLine = new THREE.Line(leftLineGeo, leftLineMat);
+        leftController.add(leftLine);
+
+        // ========== 抓取状态 ==========
+        let grabbedStar = null;
+        let isSqueezing = false;
+
+        rightController.addEventListener('squeezestart', () => {
+            isSqueezing = true;
+            grabSphereMat.color.setHex(0xff4444);
+            grabSphereMat.opacity = 0.6;
+
+            const controllerPos = new THREE.Vector3();
+            rightController.getWorldPosition(controllerPos);
+
+            let closestStar = null;
+            let closestDist = Infinity;
+
+            for (const star of stars) {
+                if (star.isGrabbed) continue;
+                const dist = controllerPos.distanceTo(star.getPosition());
+                if (dist < 0.3 && dist < closestDist) {
+                    closestDist = dist;
+                    closestStar = star;
+                }
+            }
+
+            if (closestStar) {
+                grabbedStar = closestStar;
+                grabbedStar.grab(rightController);
+            }
+        });
+
+        rightController.addEventListener('squeezeend', () => {
+            isSqueezing = false;
+            grabSphereMat.color.setHex(0x44ff88);
+            grabSphereMat.opacity = 0.3;
+
+            if (grabbedStar) {
+                grabbedStar.release();
+                grabbedStar = null;
+            }
+        });
+
+        // ========== VR 按钮逻辑（完全模仿 Three.js VRButton） ==========
+        let currentSession = null;
+
+        async function enterVR() {
+            if (currentSession === null) {
+                const sessionInit = {
+                    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                };
+                try {
+                    const session = await navigator.xr.requestSession('immersive-vr', sessionInit);
+                    session.addEventListener('end', onSessionEnded);
+                    await renderer.xr.setSession(session);
+                    currentSession = session;
+                    vrButton.textContent = '退出 VR';
+                    infoEl.style.display = 'none';
+                } catch (e) {
+                    logDiag('requestSession 失败: ' + e.message);
+                    alert('启动 VR 失败: ' + e.message);
+                }
+            } else {
+                currentSession.end();
+            }
+        }
+
+        function onSessionEnded() {
+            currentSession.removeEventListener('end', onSessionEnded);
+            currentSession = null;
+            vrButton.textContent = '进入 VR';
+            infoEl.style.display = 'block';
+        }
+
+        // ========== WebXR 兼容性检测 ==========
+        async function initVRButton() {
+            logDiag('window.isSecureContext = ' + window.isSecureContext);
+            logDiag('location.protocol = ' + location.protocol);
+            logDiag('navigator.xr = ' + typeof navigator.xr);
+
+            if ('xr' in navigator) {
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                    logDiag('immersive-vr supported = ' + supported);
+
+                    if (supported) {
+                        vrButton.textContent = '进入 VR';
+                        vrButton.addEventListener('click', enterVR);
+                        previewHint.textContent = 'WebXR 已就绪，点击按钮进入 VR';
+                    } else {
+                        vrButton.textContent = 'VR 不支持';
+                        vrButton.disabled = true;
+                        showDiagnostic(`
+                            <strong>immersive-vr 不被支持</strong><br><br>
+                            可能原因：<br>
+                            1. 您使用的不是 Pico 浏览器<br>
+                            2. Pico 系统版本较旧<br>
+                            3. 需要 HTTPS 访问<br><br>
+                            请确保使用 <strong>Pico 浏览器</strong>，并尝试用 localhost 或 HTTPS 访问。
+                        `);
+                    }
+                } catch (e) {
+                    logDiag('isSessionSupported 错误: ' + e.message);
+                    vrButton.textContent = 'VR 检测失败';
+                    vrButton.disabled = true;
+                }
+            } else {
+                logDiag('navigator.xr 不存在');
+                vrButton.textContent = '浏览器不支持 WebXR';
+                vrButton.disabled = true;
+
+                const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+                if (!window.isSecureContext && !isLocalhost) {
+                    showDiagnostic(`
+                        <strong>浏览器不支持 WebXR</strong><br><br>
+                        <span style="color:#ffcc66">最可能的原因：</span><br>
+                        您当前通过 <strong>${location.protocol}//${location.host}</strong> 访问，<br>
+                        这不是安全上下文（HTTPS/localhost）。<br><br>
+                        <strong>解决方案：</strong><br>
+                        1. 使用 HTTPS（推荐 mkcert 自签名证书）<br>
+                        2. 用 adb reverse 映射到 localhost：<br>
+                        　　<code>adb reverse tcp:8080 tcp:8080</code><br>
+                        　　然后在 Pico 浏览器访问 <code>http://localhost:8080</code><br>
+                        3. 确保使用的是 <strong>Pico 浏览器</strong>
+                    `);
+                } else {
+                    showDiagnostic(`
+                        <strong>浏览器不支持 WebXR</strong><br><br>
+                        请确保：<br>
+                        1. 使用 <strong>Pico 浏览器</strong>（系统自带）<br>
+                        2. Pico 系统已更新到最新版本<br>
+                        3. 在 Pico 浏览器设置中检查 WebXR 是否启用
+                    `);
+                }
+            }
+        }
+
+        initVRButton();
+
+        // ========== 非 VR 鼠标/键盘控制 ==========
+        const keys = { w: false, a: false, s: false, d: false };
+        const moveSpeed = 5;
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        const moveDirection = new THREE.Vector3();
+
+        let previewControls = {
+            mouseDown: false,
+            lastX: 0,
+            lastY: 0
+        };
+
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            if (renderer.xr.isPresenting) return;
+            previewControls.mouseDown = true;
+            previewControls.lastX = e.clientX;
+            previewControls.lastY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => {
+            previewControls.mouseDown = false;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (renderer.xr.isPresenting) return;
+            if (!previewControls.mouseDown) return;
+
+            const dx = e.clientX - previewControls.lastX;
+            const dy = e.clientY - previewControls.lastY;
+
+            euler.setFromQuaternion(camera.quaternion);
+            euler.y -= dx * 0.003;
+            euler.x -= dy * 0.003;
+            euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.x));
+            camera.quaternion.setFromEuler(euler);
+
+            previewControls.lastX = e.clientX;
+            previewControls.lastY = e.clientY;
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (renderer.xr.isPresenting) return;
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = false;
+        });
+
+        function updatePreviewMovement(dt) {
+            if (renderer.xr.isPresenting) return;
+
+            moveDirection.set(0, 0, 0);
+            if (keys.w) moveDirection.z -= 1;
+            if (keys.s) moveDirection.z += 1;
+            if (keys.a) moveDirection.x -= 1;
+            if (keys.d) moveDirection.x += 1;
+
+            if (moveDirection.length() > 0) {
+                moveDirection.normalize();
+                moveDirection.applyQuaternion(camera.quaternion);
+                moveDirection.y = 0;
+                camera.position.addScaledVector(moveDirection, moveSpeed * dt);
+            }
+        }
+
+        // ========== 动画循环 ==========
+        const clock = new THREE.Clock();
+
+        renderer.setAnimationLoop(() => {
+            const dt = Math.min(clock.getDelta(), 0.1);
+            const time = clock.elapsedTime;
+
+            updatePreviewMovement(dt);
+
+            for (const star of stars) {
+                star.update(dt, time);
+            }
+
+            starField.rotation.y += 0.002 * dt;
+            cloudGroup.rotation.y += 0.0005 * dt;
+
+            renderer.render(scene, camera);
+        });
+
+        // ========== 窗口调整 ==========
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
