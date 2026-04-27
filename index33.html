@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico4 WebXR 蘑菇采集</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Microsoft YaHei', sans-serif;
+        }
+        #vr-button {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 18px 40px;
+            font-size: 20px;
+            background: #2d7d46;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            z-index: 10;
+            transition: background 0.2s;
+        }
+        #vr-button:hover:not(:disabled) {
+            background: #236b39;
+        }
+        #vr-button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            z-index: 10;
+            background: rgba(0,0,0,0.6);
+            padding: 14px;
+            border-radius: 10px;
+            max-width: 340px;
+            line-height: 1.6;
+        }
+        #diagnostic {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #ff9999;
+            font-size: 13px;
+            z-index: 10;
+            background: rgba(0,0,0,0.7);
+            padding: 12px;
+            border-radius: 10px;
+            max-width: 380px;
+            line-height: 1.6;
+            display: none;
+        }
+        #diagnostic.show {
+            display: block;
+        }
+        #preview-hint {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #aaaaaa;
+            font-size: 13px;
+            z-index: 10;
+            text-align: center;
+        }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <div id="info">
+        <strong style="font-size:16px">Pico4 WebXR 蘑菇采集</strong><br>
+        1. 点击"进入VR"按钮<br>
+        2. 左手柄摇杆走路<br>
+        3. 用右手柄靠近蘑菇<br>
+        4. 按侧键(grip)抓起蘑菇<br>
+        5. 松开侧键蘑菇落下<br>
+        <span style="color:#ffcc66">鼠标拖拽旋转视角，WASD移动</span>
+    </div>
+    <div id="diagnostic"></div>
+    <div id="preview-hint"></div>
+    <button id="vr-button">检测 WebXR 中...</button>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+        const diagnosticEl = document.getElementById('diagnostic');
+        const vrButton = document.getElementById('vr-button');
+        const infoEl = document.getElementById('info');
+        const previewHint = document.getElementById('preview-hint');
+
+        function showDiagnostic(html) {
+            diagnosticEl.innerHTML = html;
+            diagnosticEl.classList.add('show');
+        }
+
+        function logDiag(msg) {
+            console.log('[WebXR诊断]', msg);
+        }
+
+        // ========== 场景初始化 ==========
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050714);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 500);
+        camera.position.set(0, 2, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        renderer.xr.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        // ========== 灯光 ==========
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(30, 50, 20);
+        scene.add(dirLight);
+
+        // ========== 星空背景 ==========
+        function createStarField() {
+            const geometry = new THREE.BufferGeometry();
+            const count = 1500;
+            const positions = new Float32Array(count * 3);
+            const colors = new Float32Array(count * 3);
+
+            for (let i = 0; i < count; i++) {
+                const r = 200 + Math.random() * 200;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+                positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+                positions[i * 3 + 1] = r * Math.cos(phi);
+                positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+                const t = Math.random();
+                colors[i * 3] = 0.8 + t * 0.2;
+                colors[i * 3 + 1] = 0.8 + t * 0.2;
+                colors[i * 3 + 2] = 1.0;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const material = new THREE.PointsMaterial({
+                size: 0.8,
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.8,
+                sizeAttenuation: false
+            });
+
+            const stars = new THREE.Points(geometry, material);
+            scene.add(stars);
+            return stars;
+        }
+
+        const starField = createStarField();
+
+        // ========== 世界组（地面+蘑菇）—— 反向移动实现 locomotion ==========
+        const worldGroup = new THREE.Group();
+        scene.add(worldGroup);
+
+        // 平地
+        const groundGeo = new THREE.PlaneGeometry(300, 300);
+        const groundMat = new THREE.MeshLambertMaterial({ color: 0x3a6b3a });
+        const ground = new THREE.Mesh(groundGeo, groundMat);
+        ground.rotation.x = -Math.PI / 2;
+        worldGroup.add(ground);
+
+        // 地面网格线，帮助感知移动
+        const gridHelper = new THREE.GridHelper(300, 60, 0x5a8b5a, 0x4a7b4a);
+        gridHelper.position.y = 0.01;
+        worldGroup.add(gridHelper);
+
+        // ========== 蘑菇 ==========
+        const mushrooms = [];
+        const MUSHROOM_COUNT = 25;
+        const GRAVITY = 15;
+
+        // 共享几何体
+        const stemGeo = new THREE.BoxGeometry(0.1, 0.3, 0.1);
+        const capGeo = new THREE.BoxGeometry(0.4, 0.12, 0.4);
+        const spotGeo = new THREE.BoxGeometry(0.06, 0.03, 0.06);
+
+        const stemMat = new THREE.MeshLambertMaterial({ color: 0xddd0c0 });
+        const capMat = new THREE.MeshLambertMaterial({ color: 0xcc3333 });
+        const spotMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+
+        class Mushroom {
+            constructor(position) {
+                this.isGrabbed = false;
+                this.grabbedBy = null;
+                this.velocity = new THREE.Vector3(0, 0, 0);
+                this.onGround = false;
+
+                // 蘑菇整体容器
+                this.mesh = new THREE.Group();
+                this.mesh.position.copy(position);
+
+                // 柄
+                const stem = new THREE.Mesh(stemGeo, stemMat);
+                stem.position.y = 0.15;
+                this.mesh.add(stem);
+
+                // 伞
+                const cap = new THREE.Mesh(capGeo, capMat);
+                cap.position.y = 0.36;
+                this.mesh.add(cap);
+
+                // 白色斑点
+                for (let i = 0; i < 4; i++) {
+                    const spot = new THREE.Mesh(spotGeo, spotMat);
+                    const angle = (i / 4) * Math.PI * 2 + Math.random() * 0.3;
+                    const r = 0.08 + Math.random() * 0.06;
+                    spot.position.set(
+                        Math.cos(angle) * r,
+                        0.42,
+                        Math.sin(angle) * r
+                    );
+                    this.mesh.add(spot);
+                }
+
+                worldGroup.add(this.mesh);
+            }
+
+            update(dt) {
+                if (this.isGrabbed && this.grabbedBy) {
+                    // 将手柄世界坐标转回 worldGroup 局部坐标
+                    const controllerWorldPos = new THREE.Vector3();
+                    this.grabbedBy.getWorldPosition(controllerWorldPos);
+                    this.mesh.position.copy(worldGroup.worldToLocal(controllerWorldPos));
+                    this.velocity.set(0, 0, 0);
+                    this.onGround = false;
+                } else {
+                    if (!this.onGround && this.mesh.position.y > 0) {
+                        this.velocity.y -= GRAVITY * dt;
+                        this.mesh.position.y += this.velocity.y * dt;
+                    }
+
+                    if (this.mesh.position.y <= 0) {
+                        this.mesh.position.y = 0;
+                        this.velocity.set(0, 0, 0);
+                        this.onGround = true;
+                    }
+                }
+            }
+
+            grab(controller) {
+                this.isGrabbed = true;
+                this.grabbedBy = controller;
+                this.velocity.set(0, 0, 0);
+                // 抓到 scene 下，脱离 worldGroup 的反向移动
+                scene.attach(this.mesh);
+            }
+
+            release() {
+                this.isGrabbed = false;
+                this.grabbedBy = null;
+                // 放回 worldGroup，保持当前世界位置
+                worldGroup.attach(this.mesh);
+                this.onGround = false;
+            }
+
+            getWorldPosition(target) {
+                return this.mesh.getWorldPosition(target);
+            }
+        }
+
+        function spawnMushrooms() {
+            for (let i = 0; i < MUSHROOM_COUNT; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = 3 + Math.random() * 30;
+                const x = Math.cos(angle) * dist;
+                const z = Math.sin(angle) * dist;
+                mushrooms.push(new Mushroom(new THREE.Vector3(x, 0, z)));
+            }
+        }
+
+        spawnMushrooms();
+
+        // ========== WebXR 控制器 ==========
+        const controllerModelFactory = new XRControllerModelFactory();
+
+        const rightController = renderer.xr.getController(1);
+        const rightGrip = renderer.xr.getControllerGrip(1);
+        scene.add(rightController);
+        scene.add(rightGrip);
+
+        const gripModel = controllerModelFactory.createControllerModel(rightGrip);
+        rightGrip.add(gripModel);
+
+        const rightLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -0.3)
+        ]);
+        const rightLineMat = new THREE.LineBasicMaterial({ color: 0x44ff88 });
+        const rightLine = new THREE.Line(rightLineGeo, rightLineMat);
+        rightController.add(rightLine);
+
+        const grabSphereGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const grabSphereMat = new THREE.MeshBasicMaterial({
+            color: 0x44ff88,
+            transparent: true,
+            opacity: 0.3,
+            wireframe: true
+        });
+        const grabSphere = new THREE.Mesh(grabSphereGeo, grabSphereMat);
+        grabSphere.position.set(0, 0, -0.05);
+        rightController.add(grabSphere);
+
+        const leftController = renderer.xr.getController(0);
+        const leftGrip = renderer.xr.getControllerGrip(0);
+        scene.add(leftController);
+        scene.add(leftGrip);
+
+        const leftGripModel = controllerModelFactory.createControllerModel(leftGrip);
+        leftGrip.add(leftGripModel);
+
+        const leftLineGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, 0, -0.3)
+        ]);
+        const leftLineMat = new THREE.LineBasicMaterial({ color: 0x4488ff });
+        const leftLine = new THREE.Line(leftLineGeo, leftLineMat);
+        leftController.add(leftLine);
+
+        // ========== 抓取状态 ==========
+        let grabbedMushroom = null;
+        let isSqueezing = false;
+
+        rightController.addEventListener('squeezestart', () => {
+            isSqueezing = true;
+            grabSphereMat.color.setHex(0xff4444);
+            grabSphereMat.opacity = 0.6;
+
+            const controllerPos = new THREE.Vector3();
+            rightController.getWorldPosition(controllerPos);
+
+            let closest = null;
+            let closestDist = Infinity;
+
+            for (const m of mushrooms) {
+                if (m.isGrabbed) continue;
+                const pos = new THREE.Vector3();
+                m.getWorldPosition(pos);
+                const dist = controllerPos.distanceTo(pos);
+                if (dist < 0.4 && dist < closestDist) {
+                    closestDist = dist;
+                    closest = m;
+                }
+            }
+
+            if (closest) {
+                grabbedMushroom = closest;
+                grabbedMushroom.grab(rightController);
+            }
+        });
+
+        rightController.addEventListener('squeezeend', () => {
+            isSqueezing = false;
+            grabSphereMat.color.setHex(0x44ff88);
+            grabSphereMat.opacity = 0.3;
+
+            if (grabbedMushroom) {
+                grabbedMushroom.release();
+                grabbedMushroom = null;
+            }
+        });
+
+        // ========== VR 按钮逻辑 ==========
+        let currentSession = null;
+
+        async function enterVR() {
+            if (currentSession === null) {
+                const sessionInit = {
+                    optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                };
+                try {
+                    const session = await navigator.xr.requestSession('immersive-vr', sessionInit);
+                    session.addEventListener('end', onSessionEnded);
+                    await renderer.xr.setSession(session);
+                    currentSession = session;
+                    vrButton.textContent = '退出 VR';
+                    infoEl.style.display = 'none';
+                } catch (e) {
+                    logDiag('requestSession 失败: ' + e.message);
+                    alert('启动 VR 失败: ' + e.message);
+                }
+            } else {
+                currentSession.end();
+            }
+        }
+
+        function onSessionEnded() {
+            currentSession.removeEventListener('end', onSessionEnded);
+            currentSession = null;
+            vrButton.textContent = '进入 VR';
+            infoEl.style.display = 'block';
+        }
+
+        // ========== WebXR 兼容性检测 ==========
+        async function initVRButton() {
+            logDiag('window.isSecureContext = ' + window.isSecureContext);
+            logDiag('location.protocol = ' + location.protocol);
+            logDiag('navigator.xr = ' + typeof navigator.xr);
+
+            if ('xr' in navigator) {
+                try {
+                    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                    logDiag('immersive-vr supported = ' + supported);
+
+                    if (supported) {
+                        vrButton.textContent = '进入 VR';
+                        vrButton.addEventListener('click', enterVR);
+                        previewHint.textContent = 'WebXR 已就绪，点击按钮进入 VR';
+                    } else {
+                        vrButton.textContent = 'VR 不支持';
+                        vrButton.disabled = true;
+                        showDiagnostic(`
+                            <strong>immersive-vr 不被支持</strong><br><br>
+                            可能原因：<br>
+                            1. 您使用的不是 Pico 浏览器<br>
+                            2. Pico 系统版本较旧<br>
+                            3. 需要 HTTPS 访问<br><br>
+                            请确保使用 <strong>Pico 浏览器</strong>，并尝试用 localhost 或 HTTPS 访问。
+                        `);
+                    }
+                } catch (e) {
+                    logDiag('isSessionSupported 错误: ' + e.message);
+                    vrButton.textContent = 'VR 检测失败';
+                    vrButton.disabled = true;
+                }
+            } else {
+                logDiag('navigator.xr 不存在');
+                vrButton.textContent = '浏览器不支持 WebXR';
+                vrButton.disabled = true;
+
+                const isLocalhost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+                if (!window.isSecureContext && !isLocalhost) {
+                    showDiagnostic(`
+                        <strong>浏览器不支持 WebXR</strong><br><br>
+                        <span style="color:#ffcc66">最可能的原因：</span><br>
+                        您当前通过 <strong>${location.protocol}//${location.host}</strong> 访问，<br>
+                        这不是安全上下文（HTTPS/localhost）。<br><br>
+                        <strong>解决方案：</strong><br>
+                        1. 使用 HTTPS（推荐 mkcert 自签名证书）<br>
+                        2. 用 adb reverse 映射到 localhost：<br>
+                        　　<code>adb reverse tcp:8080 tcp:8080</code><br>
+                        　　然后在 Pico 浏览器访问 <code>http://localhost:8080</code><br>
+                        3. 确保使用的是 <strong>Pico 浏览器</strong>
+                    `);
+                } else {
+                    showDiagnostic(`
+                        <strong>浏览器不支持 WebXR</strong><br><br>
+                        请确保：<br>
+                        1. 使用 <strong>Pico 浏览器</strong>（系统自带）<br>
+                        2. Pico 系统已更新到最新版本<br>
+                        3. 在 Pico 浏览器设置中检查 WebXR 是否启用
+                    `);
+                }
+            }
+        }
+
+        initVRButton();
+
+        // ========== 非 VR 鼠标/键盘控制 ==========
+        const keys = { w: false, a: false, s: false, d: false };
+        const moveSpeed = 5;
+        const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+        const moveDirection = new THREE.Vector3();
+
+        let previewControls = {
+            mouseDown: false,
+            lastX: 0,
+            lastY: 0
+        };
+
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            if (renderer.xr.isPresenting) return;
+            previewControls.mouseDown = true;
+            previewControls.lastX = e.clientX;
+            previewControls.lastY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => {
+            previewControls.mouseDown = false;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (renderer.xr.isPresenting) return;
+            if (!previewControls.mouseDown) return;
+
+            const dx = e.clientX - previewControls.lastX;
+            const dy = e.clientY - previewControls.lastY;
+
+            euler.setFromQuaternion(camera.quaternion);
+            euler.y -= dx * 0.003;
+            euler.x -= dy * 0.003;
+            euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.x));
+            camera.quaternion.setFromEuler(euler);
+
+            previewControls.lastX = e.clientX;
+            previewControls.lastY = e.clientY;
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (renderer.xr.isPresenting) return;
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            const key = e.key.toLowerCase();
+            if (keys.hasOwnProperty(key)) keys[key] = false;
+        });
+
+        // ========== VR 摇杆移动（反向移动 worldGroup） ==========
+        const smoothStick = { x: 0, y: 0 };
+        const stickSmoothFactor = 8;
+        const playerWorldPos = new THREE.Vector3(0, 0, 0);
+
+        function getHeadsetYQuaternion() {
+            const q = new THREE.Quaternion();
+            camera.getWorldQuaternion(q);
+            const e = new THREE.Euler().setFromQuaternion(q, 'YXZ');
+            e.x = 0;
+            e.z = 0;
+            return new THREE.Quaternion().setFromEuler(e);
+        }
+
+        function updateVRMovement(dt) {
+            if (!renderer.xr.isPresenting) return;
+
+            const session = renderer.xr.getSession();
+            if (!session) return;
+
+            let rawX = 0, rawY = 0;
+            for (const inputSource of session.inputSources) {
+                if (inputSource.handedness === 'left' && inputSource.gamepad) {
+                    const axes = inputSource.gamepad.axes;
+                    if (axes.length >= 4) {
+                        rawX = axes[2];
+                        rawY = axes[3];
+                    } else if (axes.length >= 2) {
+                        rawX = axes[0];
+                        rawY = axes[1];
+                    }
+                    break;
+                }
+            }
+
+            const applyDeadzone = (v) => {
+                const deadzone = 0.15;
+                if (Math.abs(v) < deadzone) return 0;
+                const sign = Math.sign(v);
+                const norm = (Math.abs(v) - deadzone) / (1 - deadzone);
+                return sign * norm * norm;
+            };
+
+            const targetX = applyDeadzone(rawX);
+            const targetY = applyDeadzone(rawY);
+
+            smoothStick.x += (targetX - smoothStick.x) * Math.min(stickSmoothFactor * dt, 1);
+            smoothStick.y += (targetY - smoothStick.y) * Math.min(stickSmoothFactor * dt, 1);
+
+            if (Math.abs(smoothStick.x) > 0.01 || Math.abs(smoothStick.y) > 0.01) {
+                const moveVec = new THREE.Vector3(smoothStick.x, 0, smoothStick.y);
+                const headYQ = getHeadsetYQuaternion();
+                moveVec.applyQuaternion(headYQ);
+                playerWorldPos.addScaledVector(moveVec, moveSpeed * dt);
+            }
+
+            // 反向移动世界，让用户感觉自己在走
+            worldGroup.position.set(-playerWorldPos.x, 0, -playerWorldPos.z);
+        }
+
+        function updatePreviewMovement(dt) {
+            if (renderer.xr.isPresenting) return;
+
+            moveDirection.set(0, 0, 0);
+            if (keys.w) moveDirection.z -= 1;
+            if (keys.s) moveDirection.z += 1;
+            if (keys.a) moveDirection.x -= 1;
+            if (keys.d) moveDirection.x += 1;
+
+            if (moveDirection.length() > 0) {
+                moveDirection.normalize();
+                moveDirection.applyQuaternion(camera.quaternion);
+                moveDirection.y = 0;
+                camera.position.addScaledVector(moveDirection, moveSpeed * dt);
+            }
+
+            // 预览模式下也让 worldGroup 跟随相机，保持蘑菇在身边
+            worldGroup.position.set(-camera.position.x, 0, -camera.position.z);
+        }
+
+        // ========== 动画循环 ==========
+        const clock = new THREE.Clock();
+
+        renderer.setAnimationLoop(() => {
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            updateVRMovement(dt);
+            updatePreviewMovement(dt);
+
+            for (const m of mushrooms) {
+                m.update(dt);
+            }
+
+            starField.rotation.y += 0.002 * dt;
+
+            renderer.render(scene, camera);
+        });
+
+        // ========== 窗口调整 ==========
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
